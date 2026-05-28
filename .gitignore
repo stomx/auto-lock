@@ -1,0 +1,15 @@
+.build/
+.swiftpm/
+build/
+dist/
+Package.resolved
+.DS_Store
+*.xcodeproj
+
+# Generated from Resources/icon.svg via scripts/render_icon.swift.
+# AppIcon.icns is committed; the iconset intermediate files are not.
+Resources/AppIcon.iconset/
+
+# Local agent state — never publish.
+.omc/
+/tmp/autolock.log
