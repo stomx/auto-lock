@@ -35,7 +35,7 @@ final class CountdownOverlay {
 
     private func startTicking() {
         tickTimer?.invalidate()
-        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: LockTuning.overlayTickIntervalSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.renderTick() }
         }
         // .common lets the timer fire during UI tracking (menu open, drag, etc.)

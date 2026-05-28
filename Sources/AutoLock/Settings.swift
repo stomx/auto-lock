@@ -34,12 +34,8 @@ final class Settings: ObservableObject {
         didSet { UserDefaults.standard.set(gracePeriodSeconds, forKey: Keys.gracePeriod) }
     }
 
-    let definitiveAwayMargin: Int = 10
-
     var rssiThreshold: Int { -thresholdMagnitude }
-    var lockThreshold: Int { rssiThreshold }
-    var unlockThreshold: Int { rssiThreshold }
-    var definitiveAwayThreshold: Int { rssiThreshold - definitiveAwayMargin }
+    var definitiveAwayThreshold: Int { rssiThreshold - LockTuning.definitiveAwayMarginDBm }
 
     private enum Keys {
         static let devices = "trackedDevices"

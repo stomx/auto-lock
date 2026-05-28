@@ -20,7 +20,6 @@ final class BLEScanner: NSObject, ObservableObject {
 
     private var central: CBCentralManager!
     private var smoothing: [UUID: Double] = [:]
-    private let smoothingFactor: Double = 0.3
     private var pruneTimer: Timer?
 
     override init() {
@@ -102,7 +101,7 @@ extension BLEScanner: CBCentralManagerDelegate {
         }
 
         let prev = smoothing[id] ?? Double(rssi)
-        let smoothed = prev * (1 - smoothingFactor) + Double(rssi) * smoothingFactor
+        let smoothed = prev * (1 - LockTuning.rssiSmoothingFactor) + Double(rssi) * LockTuning.rssiSmoothingFactor
         smoothing[id] = smoothed
 
         devices[id] = DiscoveredDevice(

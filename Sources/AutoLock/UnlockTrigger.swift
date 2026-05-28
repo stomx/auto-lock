@@ -45,7 +45,7 @@ enum UnlockTrigger {
         // dropped on the way through.
         _ = DisplayWaker.wake()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + LockTuning.unlockKeystrokeDelaySeconds) {
             postString(password)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 postReturnKey()

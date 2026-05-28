@@ -101,26 +101,17 @@ enum PasswordWindow {
     }
 }
 
-/// NSWindow subclass that forces ASCII-only input while it's key. Overriding
-/// `keyboardLayout` and trapping `keyDown` ensures alphabet keys reach the
-/// SecureField even when the user's system input source is Korean/Japanese/etc.
-/// This is the reliable fix; toggling TIS at the application level is racy
-/// because IMEs latch onto a first responder before our switch lands.
+/// NSWindow that drops any in-progress IME composition the moment it becomes
+/// key. Some Korean IMEs hold marked text from a prior responder and that
+/// state can swallow alphabet input even after the app-level TIS swap above.
+/// The actual ASCII-only enforcement lives on the SecureField field editor
+/// (`ASCIIOnlySecureTextField`); this class just opens the door cleanly.
 private final class ASCIIOnlyWindow: NSWindow {
     override func becomeKey() {
         super.becomeKey()
-        // Some Korean IMEs hold a marked text composition that swallows
-        // alphabet input even after TIS swap. Discarding any in-progress
-        // marked text on the first responder cleans the slate.
         if let responder = firstResponder as? NSTextView {
             responder.unmarkText()
             responder.inputContext?.discardMarkedText()
         }
-    }
-
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        // Let SecureField receive every printable key — never let the menu
-        // bar / app shortcuts swallow them.
-        return super.performKeyEquivalent(with: event)
     }
 }

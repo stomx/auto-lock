@@ -9,6 +9,38 @@ enum ProximityState: String {
     case away       // tracked devices missing or below lock threshold
 }
 
+/// Why we made the most recent state-machine transition. Kept as a domain
+/// enum so the controller stays UI/locale-agnostic — `MenuView` decides how
+/// each case is rendered to the user.
+enum LockReason: Equatable {
+    case signalStaleSeconds(Int)   // device hasn't advertised for N seconds
+    case signalWeak                // RSSI dropped below the lock threshold
+    case signalCrashed             // RSSI dropped well below threshold (instant lock)
+    case deviceUnseen              // no tracked device discovered at all
+
+    /// Stable, ASCII identifier for log lines. UI strings live in MenuView.
+    var logDescription: String {
+        switch self {
+        case .signalStaleSeconds(let s): return "stale=\(s)s"
+        case .signalWeak:                return "weak"
+        case .signalCrashed:             return "crashed"
+        case .deviceUnseen:              return "unseen"
+        }
+    }
+}
+
+/// User-facing status of the controller. Renders to a localized string in
+/// the view layer so the controller doesn't carry localized text or
+/// presentation timing information.
+enum ControllerStatus: Equatable {
+    case idle                           // toggle off
+    case awaitingDevice                 // toggle on, no tracked device
+    case watching                       // running, no concerns
+    case countdown(reason: LockReason, secondsLeft: Int)
+    case instantLock(reason: LockReason)
+    case locked(reason: LockReason)
+}
+
 @MainActor
 final class ProximityController: ObservableObject {
     static let shared = ProximityController()
@@ -18,7 +50,7 @@ final class ProximityController: ObservableObject {
 
     @Published private(set) var state: ProximityState = .unknown
     @Published private(set) var bestSeen: (deviceId: UUID, rssi: Double, age: TimeInterval)? = nil
-    @Published private(set) var statusMessage: String = "대기 중"
+    @Published private(set) var status: ControllerStatus = .idle
 
     private var awaySince: Date? = nil
     private var evaluationTimer: Timer? = nil
@@ -29,7 +61,7 @@ final class ProximityController: ObservableObject {
     private var wakeFiredForCurrentLock: Bool = false
 
     private init() {
-        evaluationTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        evaluationTimer = Timer.scheduledTimer(withTimeInterval: LockTuning.evaluationIntervalSeconds, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.evaluate() }
         }
 
@@ -37,7 +69,7 @@ final class ProximityController: ObservableObject {
             .sink { [weak self] enabled in
                 guard let self else { return }
                 if enabled { self.scanner.startScanning() }
-                self.statusMessage = enabled ? "감시 활성화됨" : "비활성화됨"
+                self.status = enabled ? .watching : .idle
             }
             .store(in: &cancellables)
 
@@ -69,7 +101,7 @@ final class ProximityController: ObservableObject {
     func evaluate() {
         guard settings.enabled else {
             state = .unknown
-            statusMessage = "비활성화됨"
+            status = .idle
             awaySince = nil
             CountdownOverlay.shared.hide()
             return
@@ -77,7 +109,7 @@ final class ProximityController: ObservableObject {
 
         guard !settings.trackedDevices.isEmpty else {
             state = .unknown
-            statusMessage = "등록된 디바이스 없음"
+            status = .awaitingDevice
             awaySince = nil
             CountdownOverlay.shared.hide()
             return
@@ -95,53 +127,47 @@ final class ProximityController: ObservableObject {
         let now = Date()
         let threshold = Double(settings.rssiThreshold)
         let definitiveAway = Double(settings.definitiveAwayThreshold)
-        let definitiveAbsenceSeconds = Double(settings.gracePeriodSeconds * 2)
+        let definitiveAbsenceSeconds = Double(settings.gracePeriodSeconds) * LockTuning.absenceMultiplier
 
         if let best {
             let age = now.timeIntervalSince(best.lastSeen)
             bestSeen = (best.id, best.rssi, age)
 
             if age > definitiveAbsenceSeconds {
-                lockNow(reason: "신호 장기 끊김 \(Int(age))s")
+                lockNow(reason: .signalStaleSeconds(Int(age)))
             } else if age > Double(settings.gracePeriodSeconds) {
-                handleAway(reason: "신호 끊김 \(Int(age))s")
+                handleAway(reason: .signalStaleSeconds(Int(age)))
             } else if best.rssi <= definitiveAway {
-                lockNow(reason: "신호 급락")
+                lockNow(reason: .signalCrashed)
             } else if best.rssi >= threshold {
                 state = .near
                 awaySince = nil
-                statusMessage = ""
+                status = .watching
                 CountdownOverlay.shared.hide()
                 maybeWakeDisplay()
             } else {
-                handleAway(reason: "신호 약함")
+                handleAway(reason: .signalWeak)
             }
         } else {
             bestSeen = nil
-            handleAway(reason: "디바이스 미감지")
+            handleAway(reason: .deviceUnseen)
         }
     }
 
     /// Skip the grace period and lock right now. Used when we're confident the
     /// user walked away (RSSI dropped well below lock threshold, or the device
     /// has been silent for far longer than the grace window).
-    private func lockNow(reason: String) {
+    private func lockNow(reason: LockReason) {
         state = .away
         awaySince = nil
-        statusMessage = "즉시 잠금: \(reason)"
+        status = .instantLock(reason: reason)
         CountdownOverlay.shared.hide()
         if !ScreenLocker.isScreenLocked() {
             let ok = ScreenLocker.lock()
-            NSLog("AutoLock: instant lock (\(ok ? "ok" : "failed")) reason=\(reason)")
+            NSLog("AutoLock: instant lock (\(ok ? "ok" : "failed")) reason=\(reason.logDescription)")
             wakeFiredForCurrentLock = false
         }
     }
-
-    /// Margin (dBm, positive) that the live RSSI must beat over the lock
-    /// threshold before we wake / auto-unlock. Locking can be liberal — false
-    /// locks are recoverable. Waking should be conservative: a brief RSSI
-    /// spike from a phone in the next room shouldn't light up the Mac.
-    private let wakeMarginDBm: Double = 20
 
     /// If the screen is currently locked and the user hasn't been re-detected
     /// yet for this lock session, light up the display so the auth prompt
@@ -161,7 +187,7 @@ final class ProximityController: ObservableObject {
         // before triggering. `state == .near` alone is too lax — its threshold
         // matches the lock decision, so the user could be at the edge.
         guard let best = bestSeen,
-              best.rssi >= Double(settings.rssiThreshold) + wakeMarginDBm else {
+              best.rssi >= Double(settings.rssiThreshold) + LockTuning.wakeMarginDBm else {
             return
         }
 
@@ -177,7 +203,7 @@ final class ProximityController: ObservableObject {
         wakeFiredForCurrentLock = true
     }
 
-    private func handleAway(reason: String) {
+    private func handleAway(reason: LockReason) {
         if awaySince == nil {
             awaySince = Date()
         }
@@ -189,11 +215,11 @@ final class ProximityController: ObservableObject {
         if remaining > 0 {
             state = .borderline
             let secondsLeft = Int(ceil(remaining))
-            statusMessage = "\(reason) — \(secondsLeft)s 후 잠금"
+            status = .countdown(reason: reason, secondsLeft: secondsLeft)
             // Overlay only kicks in for the final 5-second window. The overlay
             // owns its own tick once shown, so we pass the absolute deadline
             // instead of polling it from here.
-            if remaining <= 5 {
+            if remaining <= LockTuning.overlayWindowSeconds {
                 CountdownOverlay.shared.show(until: deadline)
             } else {
                 CountdownOverlay.shared.hide()
@@ -206,12 +232,12 @@ final class ProximityController: ObservableObject {
         // frame flashes. awaySince resets so the next out-of-range cycle
         // starts fresh from the top of the grace window.
         state = .away
-        statusMessage = "잠금: \(reason)"
+        status = .locked(reason: reason)
         awaySince = nil
 
         if !ScreenLocker.isScreenLocked() {
             let ok = ScreenLocker.lock()
-            NSLog("AutoLock: lock invoked (\(ok ? "ok" : "failed")) reason=\(reason)")
+            NSLog("AutoLock: lock invoked (\(ok ? "ok" : "failed")) reason=\(reason.logDescription)")
             wakeFiredForCurrentLock = false
         }
         CountdownOverlay.shared.hide()

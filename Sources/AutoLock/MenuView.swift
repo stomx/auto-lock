@@ -134,6 +134,7 @@ struct MenuView: View {
             optionsCard
             helpCard
             footer
+            versionLabel
         }
         .padding(14)
         .frame(width: 360)
@@ -214,8 +215,8 @@ struct MenuView: View {
                     }
                 }
 
-                if !controller.statusMessage.isEmpty {
-                    Text(controller.statusMessage)
+                if let message = statusMessage(for: controller.status) {
+                    Text(message)
                         .font(AppFont.pretendard(13, weight: .medium))
                         .foregroundStyle(Palette.muted)
                         .lineLimit(2)
@@ -506,6 +507,25 @@ struct MenuView: View {
         }
     }
 
+    private var versionLabel: some View {
+        HStack {
+            Spacer()
+            Text(Self.versionString)
+                .font(AppFont.pretendard(13))
+                .foregroundStyle(Palette.dim)
+            Spacer()
+        }
+    }
+
+    /// CFBundleShortVersionString + CFBundleVersion from Info.plist. Computed
+    /// once at type init; the bundle metadata never changes during runtime.
+    private static let versionString: String = {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let short = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        return "v\(short) (build \(build))"
+    }()
+
     // MARK: Helpers
 
     private var rssiBigText: String {
@@ -547,6 +567,30 @@ struct MenuView: View {
         case .resetting: return "재설정 중"
         case .unknown: return "초기화 중"
         @unknown default: return "알 수 없음"
+        }
+    }
+
+    /// Maps the controller's domain status to user-facing Korean text.
+    /// Returning nil means "no status banner needed" (e.g. quietly watching).
+    private func statusMessage(for status: ControllerStatus) -> String? {
+        switch status {
+        case .idle, .watching: return nil
+        case .awaitingDevice: return "등록된 디바이스 없음"
+        case .countdown(let reason, let secondsLeft):
+            return "\(reasonText(reason)) — \(secondsLeft)초 후 잠금"
+        case .instantLock(let reason):
+            return "즉시 잠금: \(reasonText(reason))"
+        case .locked(let reason):
+            return "잠금: \(reasonText(reason))"
+        }
+    }
+
+    private func reasonText(_ reason: LockReason) -> String {
+        switch reason {
+        case .signalStaleSeconds(let s): return "신호 끊김 \(s)초"
+        case .signalWeak: return "신호 약함"
+        case .signalCrashed: return "신호 급락"
+        case .deviceUnseen: return "디바이스 미감지"
         }
     }
 }

@@ -3,6 +3,26 @@
 이 프로젝트의 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를
 따르고, 버전 번호는 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.2.1] — 2026-05-28
+
+### Added
+- 메뉴 하단에 빌드 버전 표시 (`v0.2.1 (build 3)`).
+- `docs/PROJECT_STATUS.md` — 프로젝트 현황과 후속 과제 정리.
+- `Sources/AutoLock/LockTuning.swift` — 도메인 튜닝 상수(8개)를 단일 소스로 통합.
+
+### Changed
+- 화면 깨우기/자동 해제 트리거에 잠금 임계값 대비 **+20 dBm 마진** 적용 — 옆방
+  신호로 인한 화면 켜짐 오작동 방지.
+- 컨트롤러 상태를 한국어 문자열에서 `LockReason` / `ControllerStatus` enum으로
+  분리. UI 레이어에서 한국어 매핑 — i18n 가능 구조.
+- 매직 넘버(`0.3` smoothing, `0.6s` keystroke delay, `1.0s` evaluate, `0.05s` overlay
+  tick, grace 배수, wake margin 등)를 `LockTuning`으로 명명.
+- 파일명 정합: `LockController.swift` → `ScreenLocker.swift`.
+
+### Removed
+- 미사용 `Settings.lockThreshold` / `unlockThreshold` 별칭.
+- `PasswordWindow.ASCIIOnlyWindow`의 no-op `performKeyEquivalent` 오버라이드.
+
 ## [0.2.0] — 2026-05-28
 
 ### Added
