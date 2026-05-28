@@ -79,10 +79,13 @@ xattr -d com.apple.quarantine /Applications/AutoLock.app
 
 해제 방식은 두 가지가 있습니다.
 
-### 방식 A: Apple Watch Auto Unlock (권장)
+### 방식 A: Apple Watch Auto Unlock (권장 — macOS 기본 기능)
+
+이건 Apple이 제공하는 시스템 기능입니다 (AutoLock과 무관). AutoLock이 잠그고,
+macOS가 워치로 풀어주는 분담:
 
 1. 시스템 설정 → 잠금 화면
-2. **"Apple Watch로 Mac 잠금 해제 가능"** 활성화
+2. **"Apple Watch로 Mac 잠금 해제 가능"** 직접 활성화
 
 가장 안정적이고 보안적으로 깔끔합니다.
 

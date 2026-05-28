@@ -61,11 +61,14 @@ iPhone/Android 폰이 BLE 신호를 송출해야 Mac이 RSSI를 잡을 수 있�
 신호 패킷에는 `Complete Local Name`을 붙여두면 메뉴 픽커에서 식별이 쉽습니다.
 앱이 켜진 동안에는 동일한 peripheral identifier가 유지되므로 Mac이 같은 디바이스로 계속 인식합니다.
 
-### 자동 해제 설정 (Apple Watch)
+### Apple Watch와 함께 쓰기 (macOS 기본 기능)
 
-1. **시스템 설정 → 잠금 화면 → "Apple Watch로 Mac 잠금 해제"** 활성화
-2. 메뉴바 앱이 자물쇠를 잠그면, Apple Watch가 손목에 있고 잠금 해제된 상태에서
-   Mac을 깨우는 것만으로 자동 해제됩니다
+이 앱은 **잠금만** 합니다. 해제는 macOS가 기본 제공하는 Apple Watch Auto Unlock으로:
+
+1. 시스템 설정 → 잠금 화면 → **"Apple Watch로 Mac 잠금 해제"** 직접 활성화
+   (이건 Apple이 제공하는 시스템 기능이며, 본 앱이 구현한 기능이 아닙니다)
+2. AutoLock이 자물쇠를 잠그면, Apple Watch가 손목에 있고 잠금 해제된 상태에서
+   Mac을 깨우는 것만으로 macOS가 알아서 풀어줍니다
 
 Apple Watch가 없으면 Touch ID/비밀번호로 직접 해제해야 하지만, **"근접 시 화면 깨우기"**
 토글을 켜두면 Mac에 다가가는 순간 화면이 미리 켜져서 Touch ID 한 번으로 즉시 풀립니다.
