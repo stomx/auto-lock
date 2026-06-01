@@ -1,33 +1,34 @@
 import Foundation
 import CoreBluetooth
 import Combine
+import AutoLockCore
 
-struct DiscoveredDevice: Identifiable, Hashable {
-    let id: UUID
-    var name: String
-    var rssi: Int
-    var smoothedRssi: Double
-    var lastSeen: Date
-}
-
-final class BLEScanner: NSObject, ObservableObject {
-    @Published private(set) var devices: [UUID: DiscoveredDevice] = [:]
-    @Published private(set) var bluetoothState: CBManagerState = .unknown
-    @Published private(set) var isScanning: Bool = false
+public final class BLEScanner: NSObject, ObservableObject, ProximityScanning {
+    @Published public private(set) var devices: [UUID: DiscoveredDevice] = [:]
+    @Published public private(set) var bluetoothState: CBManagerState = .unknown
+    @Published public private(set) var isScanning: Bool = false
     /// True once we've called `centralManagerDidUpdateState` at least once. Until
     /// then `bluetoothState == .unknown` because CoreBluetooth hasn't reported in.
-    @Published private(set) var stateResolved: Bool = false
+    @Published public private(set) var stateResolved: Bool = false
 
     private var central: CBCentralManager!
     private var smoothing: [UUID: Double] = [:]
     private var pruneTimer: Timer?
 
-    override init() {
+    /// Supplies the current user grace period so pruning stays in sync with the
+    /// proximity state machine. The pruner MUST evict later than the absence
+    /// (instant-lock) point — see `LockTuning.pruneAfterSeconds` — otherwise the
+    /// stale/absence lock branches in `ProximityEvaluator` become unreachable.
+    /// `ProximityController` wires this to `Settings.gracePeriodSeconds`. When
+    /// unset we fall back to the maximum grace so we never prune too soon.
+    public var gracePeriodProvider: () -> Int = { LockTuning.maxGracePeriodSeconds }
+
+    public override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: .main)
     }
 
-    func startScanning() {
+    public func startScanning() {
         guard central.state == .poweredOn else { return }
         if central.isScanning { central.stopScan() }
         // Restart so options take effect (CoreBluetooth caches the first call's options).
@@ -45,32 +46,31 @@ final class BLEScanner: NSObject, ObservableObject {
         startPruneTimer()
     }
 
-    func stopScanning() {
+    public func stopScanning() {
         if central.isScanning { central.stopScan() }
         isScanning = false
         pruneTimer?.invalidate()
         pruneTimer = nil
     }
 
-    func currentRSSI(for id: UUID) -> Double? {
-        devices[id]?.smoothedRssi
-    }
-
-    func clearStale(olderThan seconds: TimeInterval = 8) {
+    /// Evict devices silent longer than the grace-derived prune threshold,
+    /// computed from the live grace period.
+    func clearStale() {
+        let threshold = LockTuning.pruneAfterSeconds(gracePeriodSeconds: gracePeriodProvider())
         let now = Date()
-        devices = devices.filter { now.timeIntervalSince($0.value.lastSeen) <= seconds }
+        devices = devices.filter { now.timeIntervalSince($0.value.lastSeen) <= threshold }
     }
 
     private func startPruneTimer() {
         pruneTimer?.invalidate()
-        pruneTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        pruneTimer = Timer.scheduledTimer(withTimeInterval: LockTuning.prunePollIntervalSeconds, repeats: true) { [weak self] _ in
             self?.clearStale()
         }
     }
 }
 
 extension BLEScanner: CBCentralManagerDelegate {
-    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+    public func centralManagerDidUpdateState(_ central: CBCentralManager) {
         bluetoothState = central.state
         stateResolved = true
         if central.state == .poweredOn {
@@ -80,7 +80,7 @@ extension BLEScanner: CBCentralManagerDelegate {
         }
     }
 
-    func centralManager(_ central: CBCentralManager,
+    public func centralManager(_ central: CBCentralManager,
                         didDiscover peripheral: CBPeripheral,
                         advertisementData: [String : Any],
                         rssi RSSI: NSNumber) {
@@ -107,7 +107,6 @@ extension BLEScanner: CBCentralManagerDelegate {
         devices[id] = DiscoveredDevice(
             id: id,
             name: displayName,
-            rssi: rssi,
             smoothedRssi: smoothed,
             lastSeen: Date()
         )

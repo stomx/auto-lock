@@ -1,6 +1,8 @@
 import SwiftUI
 import AppKit
 import CoreBluetooth
+import AutoLockCore
+import AutoLockKit
 
 // MARK: - Design tokens
 
@@ -109,20 +111,21 @@ private struct Caption: View {
 struct MenuView: View {
     @ObservedObject var controller: ProximityController
     @ObservedObject private var scanner: BLEScanner
-    @ObservedObject private var settings: Settings
+    @ObservedObject private var settings: AutoLockKit.Settings
     @State private var launchAtLogin: Bool = LaunchAtLogin.isEnabled
     @State private var helpExpanded: Bool = false
     @State private var hasPassword: Bool = KeychainStore.hasPassword()
     @State private var hasAccessibility: Bool = UnlockTrigger.hasAccessibility()
-    /// Re-checks the AX trust + Keychain state on a cadence so the badges
-    /// flip green the moment the user grants permission in System Settings.
-    /// `AXIsProcessTrustedWithOptions` is cheap (microseconds) so polling
-    /// while the menu is open is fine.
+    /// Re-checks the AX trust on a cadence so the badge flips green the moment
+    /// the user grants Accessibility in System Settings. `AXIsProcessTrustedWithOptions`
+    /// is cheap (microseconds) so polling while the menu is open is fine. We do
+    /// NOT poll the Keychain here — `hasPassword` changes only via this app's own
+    /// password sheet, which refreshes the flag directly in its completion handler.
     private let permissionTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
-    init(controller: ProximityController) {
+    init(controller: ProximityController, scanner: BLEScanner) {
         self.controller = controller
-        self.scanner = controller.scanner
+        self.scanner = scanner
         self.settings = controller.settings
     }
 
@@ -142,8 +145,6 @@ struct MenuView: View {
         .onReceive(permissionTimer) { _ in
             let ax = UnlockTrigger.hasAccessibility()
             if ax != hasAccessibility { hasAccessibility = ax }
-            let pw = KeychainStore.hasPassword()
-            if pw != hasPassword { hasPassword = pw }
         }
     }
 
@@ -673,13 +674,16 @@ private struct GhostButtonStyle: ButtonStyle {
 
 struct DevicePickerView: View {
     @ObservedObject var scanner: BLEScanner
-    @ObservedObject var settings: Settings
+    @ObservedObject var settings: AutoLockKit.Settings
     let onClose: () -> Void
     @State private var nameOverride: String = ""
     @State private var hideUnknown: Bool = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        // Compute the filtered/sorted list once per render — it feeds both the
+        // count badge and the ForEach below.
+        let devices = sortedDevices
+        return VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Caption(text: "디바이스 페어링")
                 Text("신호 디바이스 선택")
@@ -701,7 +705,7 @@ struct DevicePickerView: View {
                     Circle()
                         .fill(Palette.lime)
                         .frame(width: 6, height: 6)
-                    Text("\(sortedDevices.count)개 감지됨")
+                    Text("\(devices.count)개 감지됨")
                         .font(AppFont.pretendard(13, weight: .semibold))
                         .foregroundStyle(Palette.muted)
                 }
@@ -709,7 +713,7 @@ struct DevicePickerView: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(sortedDevices, id: \.id) { device in
+                    ForEach(devices, id: \.id) { device in
                         Button {
                             let name = nameOverride.isEmpty ? device.name : nameOverride
                             settings.addDevice(TrackedDevice(id: device.id, name: name))
@@ -888,68 +892,5 @@ struct PasswordSheetView: View {
         .padding(20)
         .frame(width: 360)
         .background(Palette.bg)
-    }
-}
-
-// MARK: - ASCII-only secure text field
-
-/// `NSSecureTextField` wrapper that:
-///   1. Reports `allowsCharacterPicker = false` and disables marked text so
-///      Korean/Japanese/Chinese IMEs cannot swallow keys for composition.
-///   2. Auto-focuses and grabs first-responder once mounted, so the user can
-///      start typing immediately when the window opens.
-struct ASCIISecureField: NSViewRepresentable {
-    @Binding var text: String
-    let placeholder: String
-
-    func makeNSView(context: Context) -> NSSecureTextField {
-        let field = ASCIIOnlySecureTextField(string: text)
-        field.placeholderString = placeholder
-        field.isBordered = false
-        field.drawsBackground = false
-        field.focusRingType = .none
-        field.font = NSFont(name: "Pretendard", size: 14) ?? NSFont.systemFont(ofSize: 14)
-        field.delegate = context.coordinator
-        DispatchQueue.main.async { field.window?.makeFirstResponder(field) }
-        return field
-    }
-
-    func updateNSView(_ nsView: NSSecureTextField, context: Context) {
-        if nsView.stringValue != text { nsView.stringValue = text }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
-
-    final class Coordinator: NSObject, NSTextFieldDelegate {
-        let text: Binding<String>
-        init(text: Binding<String>) { self.text = text }
-        func controlTextDidChange(_ obj: Notification) {
-            if let field = obj.object as? NSTextField {
-                text.wrappedValue = field.stringValue
-            }
-        }
-    }
-}
-
-/// NSSecureTextField that constrains its field editor to ASCII input sources
-/// (Roman/Latin), so Korean/Japanese/Chinese IMEs cannot intercept alphabet
-/// keys for composition. AppKit honors `allowedInputSourceLocales` on the
-/// field editor's inputContext and routes keystrokes through an ABC-only
-/// input source while this responder is active, regardless of the user's
-/// system-wide input source choice.
-private final class ASCIIOnlySecureTextField: NSSecureTextField {
-    override var allowsVibrancy: Bool { false }
-
-    override func becomeFirstResponder() -> Bool {
-        let ok = super.becomeFirstResponder()
-        if let editor = currentEditor() {
-            editor.inputContext?.allowedInputSourceLocales = [
-                NSAllRomanInputSourcesLocaleIdentifier
-            ]
-            (editor as? NSTextView)?.unmarkText()
-            editor.inputContext?.discardMarkedText()
-            editor.inputContext?.invalidateCharacterCoordinates()
-        }
-        return ok
     }
 }

@@ -115,3 +115,70 @@ private final class ASCIIOnlyWindow: NSWindow {
         }
     }
 }
+
+// MARK: - ASCII-only secure text field
+
+/// `NSSecureTextField` wrapper that:
+///   1. Disables marked text so Korean/Japanese/Chinese IMEs cannot swallow
+///      keys for composition.
+///   2. Auto-focuses and grabs first-responder once mounted, so the user can
+///      start typing immediately when the window opens.
+///
+/// This is the third (and primary) IME-blocking layer, alongside the app-level
+/// TIS swap in `PasswordWindow` and the window-level unmark in `ASCIIOnlyWindow`.
+/// All three live in this file so the layered defense reads top-to-bottom.
+struct ASCIISecureField: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+
+    func makeNSView(context: Context) -> NSSecureTextField {
+        let field = ASCIIOnlySecureTextField(string: text)
+        field.placeholderString = placeholder
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = NSFont(name: "Pretendard", size: 14) ?? NSFont.systemFont(ofSize: 14)
+        field.delegate = context.coordinator
+        DispatchQueue.main.async { field.window?.makeFirstResponder(field) }
+        return field
+    }
+
+    func updateNSView(_ nsView: NSSecureTextField, context: Context) {
+        if nsView.stringValue != text { nsView.stringValue = text }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        let text: Binding<String>
+        init(text: Binding<String>) { self.text = text }
+        func controlTextDidChange(_ obj: Notification) {
+            if let field = obj.object as? NSTextField {
+                text.wrappedValue = field.stringValue
+            }
+        }
+    }
+}
+
+/// NSSecureTextField that constrains its field editor to ASCII input sources
+/// (Roman/Latin), so Korean/Japanese/Chinese IMEs cannot intercept alphabet
+/// keys for composition. AppKit honors `allowedInputSourceLocales` on the
+/// field editor's inputContext and routes keystrokes through an ABC-only
+/// input source while this responder is active, regardless of the user's
+/// system-wide input source choice.
+private final class ASCIIOnlySecureTextField: NSSecureTextField {
+    override var allowsVibrancy: Bool { false }
+
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if let editor = currentEditor() {
+            editor.inputContext?.allowedInputSourceLocales = [
+                NSAllRomanInputSourcesLocaleIdentifier
+            ]
+            (editor as? NSTextView)?.unmarkText()
+            editor.inputContext?.discardMarkedText()
+            editor.inputContext?.invalidateCharacterCoordinates()
+        }
+        return ok
+    }
+}

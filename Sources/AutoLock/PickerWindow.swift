@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import AutoLockKit
 
 /// Standalone NSWindow for the device picker.
 ///
@@ -11,7 +12,7 @@ import SwiftUI
 enum PickerWindow {
     private static var window: NSWindow?
 
-    static func show(scanner: BLEScanner, settings: Settings) {
+    static func show(scanner: BLEScanner, settings: AutoLockKit.Settings) {
         if let existing = window {
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)

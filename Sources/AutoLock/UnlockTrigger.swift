@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import AutoLockCore
 
 /// Attempts to bring a locked Mac all the way to the desktop by waking the
 /// display and typing the saved password into the loginwindow prompt.
@@ -11,13 +12,6 @@ import ApplicationServices
 /// some hardened configurations the OS drops them silently. We surface the
 /// outcome via the result enum so the UI can fall back to "wake-only".
 enum UnlockTrigger {
-    enum Result {
-        case unlocked
-        case noPassword
-        case noAccessibility
-        case dispatched   // keys were sent; we can't observe whether loginwindow accepted them
-    }
-
     /// Returns true when the system reports that this process is allowed to
     /// post synthetic keyboard events. We never *prompt* automatically — the
     /// caller decides when to show the system prompt to avoid surprising the user.
@@ -35,7 +29,7 @@ enum UnlockTrigger {
 
     /// Wake the display, then post the saved password followed by Return.
     /// Caller must have already verified `ScreenLocker.isScreenLocked()`.
-    static func attempt() -> Result {
+    static func attempt() -> UnlockOutcome {
         guard let password = KeychainStore.load() else { return .noPassword }
         guard hasAccessibility(prompt: false) else { return .noAccessibility }
 

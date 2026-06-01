@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import AutoLockCore
 
 /// Big translucent countdown displayed in the middle of the screen during the
 /// grace period. The window ignores mouse events so it never gets in the way
@@ -18,6 +19,10 @@ final class CountdownOverlay {
     /// high-frequency tick so the digit doesn't stutter when the parent
     /// evaluation cadence drifts.
     func show(until deadline: Date) {
+        // `evaluate()` re-calls this every second across the overlay window with
+        // the same deadline. Bail early when already showing it so we don't tear
+        // down and rebuild the 20Hz tick timer once per second.
+        if self.deadline == deadline, tickTimer != nil { return }
         ensureWindow()
         self.deadline = deadline
         window?.orderFrontRegardless()
