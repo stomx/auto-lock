@@ -13,3 +13,6 @@ Resources/AppIcon.iconset/
 # Local agent state — never publish.
 .omc/
 /tmp/autolock.log
+
+# Local bkit tool state — never publish.
+.bkit/
