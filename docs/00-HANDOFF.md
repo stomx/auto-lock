@@ -2,7 +2,7 @@
 title: AutoLock 작업 핸드오프
 project: AutoLock
 status: in-progress
-version: v0.3.0 (Phase 1, 미커밋)
+version: v0.3.0 (배포 완료, v0.3.1 후속 대기)
 updated: 2026-06-02
 tags: [autolock, handoff, pdca, swift, macos, ble]
 aliases: [핸드오프, HANDOFF, 이어서작업]
@@ -82,14 +82,17 @@ BLE RSSI 기반 macOS 메뉴바 자동 잠금 앱. v0.3.0 Phase 1(근접 타이�
 
 ## ✅ 다음 할 일 (우선순위)
 
-비용 대비 효과 순. TDD 모드면 "테스트 먼저 작성 → 실패 확인 → 구현" 순서로.
+> v0.3.0 커밋·푸시·배포는 **완료**(아래 ~~취소선~~). 남은 것은 v0.3.1 후속 품질 개선.
+> 비용 대비 효과 순. TDD 모드면 "테스트 먼저 작성 → 실패 확인 → 구현" 순서로.
 
 1. [ ] **`KeychainStore` 왕복 테스트** — 격리 service명으로 save→load→delete (저비용·고가치, 보안 핵심)
 2. [ ] **`Settings.persistDevices` 영속화 왕복 테스트** — 이미 격리 UserDefaults 사용 → 거의 공짜
-3. [ ] **`MenuView.swift` 3분할** — Clean Code Major 해소
-4. [ ] **상태→표현 매핑 단일화** — 중복 3곳 통합
-5. [ ] **Git 커밋·푸시** — 한글 메시지, 논리 단위 분할 (※ 사용자 명시 요청 시에만)
+3. [ ] **`MenuView.swift` 3분할** — Clean Code Major 해소 (DesignTokens / DevicePickerView / PasswordSheetView)
+4. [ ] **상태→표현 매핑 단일화** — `ProximityState` switch 중복 3곳 통합 (OCP)
+5. [ ] **`Settings.shared` 싱글톤 정리** — DIP 누수 해소
 6. [ ] (선택) 수동 E2E 체크리스트 실기기 수행 → [[proximity-timing-fix.e2e-manual]]
+7. [x] ~~Git 커밋·푸시~~ — ✅ 완료 (6커밋, `00385ad`)
+8. [x] ~~v0.3.0 릴리스 배포~~ — ✅ 완료 (DMG/ZIP/체크섬, GitHub Releases)
 
 ---
 
