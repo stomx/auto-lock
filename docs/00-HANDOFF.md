@@ -28,13 +28,15 @@ BLE RSSI 기반 macOS 메뉴바 자동 잠금 앱. v0.3.0 Phase 1(근접 타이�
 | 기능 구현 | ✅ v0.3.0 Phase 1 완료 (3계층 분리 + DI 리팩터링) |
 | 자동 테스트 | ✅ 37건 전부 통과 (`./scripts/test.sh`) |
 | 빌드 | ✅ debug + release 통과 |
-| **Git 커밋** | ⛔ **미커밋** (작업 트리에 대량 변경 누적) |
+| **Git 커밋·푸시** | ✅ **완료** — 5개 커밋 `origin/main` 반영 (2026-06-02) |
+| **GitHub 릴리스** | ✅ **v0.3.0 배포** — DMG/ZIP/체크섬 업로드 |
 | 옵시디언 동기화 | Obsidian Sync (이 폴더가 vault) |
 
-> [!warning] 커밋 안 됨
-> AutoLockKit 분리, AutoLockCore 신설, 테스트 37건, 진단 도구, 프롬프트 히스토리 문서 등
-> **모든 산출물이 아직 커밋되지 않았습니다.** 다른 기기에서 git pull로 이어받으려면
-> 이 기기에서 먼저 커밋·푸시해야 합니다. (Obsidian Sync는 `docs/` 마크다운만 동기화 — 소스코드는 git 필요)
+> [!success] v0.3.0 커밋·푸시·배포 완료 (2026-06-02)
+> 5개 논리 커밋(`5a6d747`~`8527035`)으로 push 완료, GitHub 릴리스 v0.3.0 생성.
+> 원격 `Sources/`에 AutoLockCore/AutoLockKit 반영 확인, 태그 v0.3.0 존재.
+> → https://github.com/stomx/auto-lock/releases/tag/v0.3.0
+> 다른 기기에서 `git pull`로 코드까지 이어받을 수 있습니다.
 
 ---
 
