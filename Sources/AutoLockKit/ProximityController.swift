@@ -16,8 +16,10 @@ public final class ProximityController: ObservableObject {
     @Published public private(set) var bestSeen: (rssi: Double, age: TimeInterval)? = nil
     @Published public private(set) var status: ControllerStatus = .idle
 
-    /// 평가에 쓰이는 시계. 일반 동작에서는 `Date()`, 테스트에서는 고정 시각을 주입한다.
-    var now: () -> Date = { Date() }
+    /// 평가에 쓰이는 시계. 일반 동작에서는 단조 클럭(`MonotonicClock`), 테스트에서는
+    /// 고정 시각을 주입한다. BLEScanner의 `lastSeen`과 반드시 같은 타임라인이어야
+    /// age/deadline 차이가 실제 경과시간과 일치한다(벽시계 점프 내성).
+    var now: () -> Date = { MonotonicClock.now() }
 
     private var awaySince: Date? = nil
     private var evaluationTimer: Timer? = nil
@@ -58,9 +60,22 @@ public final class ProximityController: ObservableObject {
         settings.$enabled
             .sink { [weak self] enabled in
                 guard let self else { return }
-                if enabled { self.scanner.startScanning() }
-                else       { self.scanner.stopScanning() }
-                self.status = enabled ? .watching : .idle
+                if enabled {
+                    self.scanner.startScanning()
+                    self.status = .watching
+                } else {
+                    self.scanner.stopScanning()
+                    // Reset published UI state immediately on toggle-off so the
+                    // menu doesn't keep showing a stale RSSI / countdown for up
+                    // to one evaluation tick. Mirrors evaluate()'s disabled
+                    // guard, and clearing awaySince prevents a quick OFF→ON from
+                    // resuming a half-finished countdown.
+                    self.state = .unknown
+                    self.status = .idle
+                    self.bestSeen = nil
+                    self.awaySince = nil
+                    self.overlay.hide()
+                }
             }
             .store(in: &cancellables)
     }
@@ -80,6 +95,7 @@ public final class ProximityController: ObservableObject {
             state = .unknown
             status = .idle
             awaySince = nil
+            bestSeen = nil
             overlay.hide()
             return
         }
@@ -88,6 +104,7 @@ public final class ProximityController: ObservableObject {
             state = .unknown
             status = .awaitingDevice
             awaySince = nil
+            bestSeen = nil
             overlay.hide()
             return
         }
@@ -121,6 +138,13 @@ public final class ProximityController: ObservableObject {
     /// Reflect a pure `ProximityDecision` onto published state and run its side
     /// effect. The decision itself carries no clock or I/O — that all happens here.
     private func apply(_ decision: ProximityDecision) {
+        // The away-cycle start as it stood *before* this decision. A failed
+        // lock needs it: the grace-expiry lock branch resets awaySince to nil,
+        // and if we kept that on failure the next tick would restart the
+        // countdown instead of re-locking. Restoring the prior value keeps the
+        // evaluator on the lock path so retries fire every tick.
+        let priorAwaySince = awaySince
+
         state = decision.state
         status = decision.status
         awaySince = decision.awaySince
@@ -138,7 +162,15 @@ public final class ProximityController: ObservableObject {
             if !screenLocker.isScreenLocked() {
                 let ok = screenLocker.lock()
                 NSLog("AutoLock: lock invoked (\(ok ? "ok" : "failed")) reason=\(reason.logDescription)")
-                wakeFiredForCurrentLock = false
+                if ok {
+                    wakeFiredForCurrentLock = false
+                } else {
+                    // Don't pretend we locked. Surface the failure and keep the
+                    // pre-lock away-cycle start so the next tick retries locking
+                    // rather than restarting the countdown.
+                    status = .lockFailed(reason: reason)
+                    awaySince = priorAwaySince
+                }
             }
         }
     }
@@ -168,7 +200,15 @@ public final class ProximityController: ObservableObject {
         case .attemptUnlock:
             let result = unlocker.attempt()
             NSLog("AutoLock: auto-unlock attempt result=\(result)")
-            wakeFiredForCurrentLock = true
+            // If the attempt couldn't run (no password / no Accessibility / no
+            // event source), fall back to at least waking the display so the
+            // user isn't left with a black screen and no way to authenticate.
+            let followup = UnlockFollowup.decide(outcome: result)
+            if followup.shouldWakeDisplay {
+                let ok = waker.wake()
+                NSLog("AutoLock: auto-unlock fallback wake (\(ok ? "ok" : "failed"))")
+            }
+            wakeFiredForCurrentLock = followup.latchFired
         case .wakeDisplay:
             let ok = waker.wake()
             NSLog("AutoLock: proximity wake (\(ok ? "ok" : "failed"))")

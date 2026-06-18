@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import AutoLockCore
 
 enum ScreenLocker {
     /// Trigger the standard macOS screen lock.
@@ -14,7 +15,7 @@ enum ScreenLocker {
             "/System/Library/PrivateFrameworks/login.framework/Versions/Current/login",
             RTLD_NOW
         ) else {
-            NSLog("AutoLock: dlopen(login.framework) failed: \(String(cString: dlerror()))")
+            NSLog("AutoLock: dlopen(login.framework) failed: \(CStringSafe.string(from: dlerror(), fallback: "no error info"))")
             return false
         }
         defer { dlclose(handle) }

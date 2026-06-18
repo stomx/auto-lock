@@ -68,4 +68,15 @@ import Foundation
         )
         #expect(a == .wakeDisplay)
     }
+
+    // 이미 발화 후 사용자가 화면을 해제함 → 다음 잠금 세션을 위해 재무장.
+    // (회귀: alreadyFired 가드가 isScreenLocked 가드보다 먼저면 영영 재무장 안 돼
+    //  두 번째 잠금부터 wake/auto-unlock이 발화하지 않는다.)
+    @Test func firedThenUnlockedRearms() {
+        let a = WakeDecision.decide(
+            wakeOnProximity: true, autoUnlock: false, alreadyFired: true,
+            isScreenLocked: false, bestRssi: -40, rssiThreshold: -70
+        )
+        #expect(a == .armForNextLock)
+    }
 }

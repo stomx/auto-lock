@@ -11,6 +11,7 @@ import AutoLockKit
 @MainActor
 enum PickerWindow {
     private static var window: NSWindow?
+    private static let closeDelegate = WindowCloseDelegate { cleanup() }
 
     static func show(scanner: BLEScanner, settings: AutoLockKit.Settings) {
         if let existing = window {
@@ -28,6 +29,10 @@ enum PickerWindow {
         win.title = "디바이스 선택"
         win.center()
         win.isReleasedWhenClosed = false
+        // Titlebar close must clear the static window reference too, otherwise
+        // re-opening returns a stale orderOut window. (PasswordWindow shares
+        // this delegate type.)
+        win.delegate = closeDelegate
         win.contentView = NSHostingView(
             rootView: DevicePickerView(
                 scanner: scanner,
@@ -41,7 +46,10 @@ enum PickerWindow {
     }
 
     static func close() {
-        window?.orderOut(nil)
+        window?.close()
+    }
+
+    private static func cleanup() {
         window = nil
     }
 }

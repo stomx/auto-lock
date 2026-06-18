@@ -12,6 +12,7 @@ import Carbon
 enum PasswordWindow {
     private static var window: NSWindow?
     private static var previousInputSource: TISInputSource?
+    private static let closeDelegate = WindowCloseDelegate { cleanup() }
 
     static func show(onSaved: @escaping () -> Void) {
         // Hide any open MenuBarExtra popover. While the popover is key, AppKit
@@ -44,6 +45,11 @@ enum PasswordWindow {
         win.center()
         win.level = .floating
         win.isReleasedWhenClosed = false
+        // Route the titlebar close button through the same cleanup as our
+        // buttons. Without this, clicking the red close button bypasses
+        // close() — the IME stays forced to ABC and the static `window`
+        // reference dangles (so re-opening returns a stale, orderOut window).
+        win.delegate = closeDelegate
         win.contentView = NSHostingView(
             rootView: PasswordSheetView(
                 hasPassword: KeychainStore.hasPassword(),
@@ -66,9 +72,16 @@ enum PasswordWindow {
         win.makeKeyAndOrderFront(nil)
     }
 
+    /// Button-initiated close. Triggers `windowWillClose`, which runs `cleanup()`.
     static func close() {
+        window?.close()
+    }
+
+    /// Single cleanup path, invoked from `windowWillClose` regardless of whether
+    /// the close came from a button or the titlebar. Idempotent: restoring a nil
+    /// input source and nil-ing an already-nil window are both no-ops.
+    private static func cleanup() {
         restoreInputSource()
-        window?.orderOut(nil)
         window = nil
     }
 
@@ -114,6 +127,17 @@ private final class ASCIIOnlyWindow: NSWindow {
             responder.inputContext?.discardMarkedText()
         }
     }
+}
+
+/// Bridges `NSWindow`'s titlebar-close (and any other close path) to a cleanup
+/// closure, so a window's owner runs the same teardown no matter how it closed.
+/// `windowWillClose` fires for the red close button, `performClose:`, and
+/// programmatic `close()` alike — the single choke point we need.
+@MainActor
+final class WindowCloseDelegate: NSObject, NSWindowDelegate {
+    private let onClose: () -> Void
+    init(onClose: @escaping () -> Void) { self.onClose = onClose }
+    func windowWillClose(_ notification: Notification) { onClose() }
 }
 
 // MARK: - ASCII-only secure text field
