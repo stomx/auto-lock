@@ -50,7 +50,11 @@ final class CountdownOverlay {
 
     private func renderTick() {
         guard let deadline else { return }
-        let remaining = deadline.timeIntervalSinceNow
+        // The deadline comes from the proximity evaluator, which now runs on
+        // the monotonic clock. Measure remaining time against the SAME clock —
+        // `timeIntervalSinceNow` (wall clock) would be off by the wall↔monotonic
+        // offset and show a wildly wrong countdown.
+        let remaining = deadline.timeIntervalSince(MonotonicClock.now())
         if remaining <= 0 {
             // Skip rendering "0" — the parent locks the screen at this point
             // and the overlay should disappear, not flash a final digit.

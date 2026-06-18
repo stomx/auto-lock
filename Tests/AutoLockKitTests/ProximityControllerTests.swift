@@ -5,9 +5,10 @@ import AutoLockCore
 
 // MARK: - 가짜 의존성
 
+@MainActor
 final class FakeScanner: ProximityScanning {
     var devices: [UUID: DiscoveredDevice] = [:]
-    var gracePeriodProvider: () -> Int = { 60 }
+    var gracePeriodProvider: @MainActor () -> Int = { 60 }
     private(set) var startCount = 0
     private(set) var stopCount = 0
 
@@ -17,12 +18,15 @@ final class FakeScanner: ProximityScanning {
 
 final class SpyScreenLocker: ScreenLocking {
     var lockedState = false
+    /// When false, lock() reports failure and does NOT flip lockedState —
+    /// simulating the private lock symbol being unavailable.
+    var lockSucceeds = true
     private(set) var lockCount = 0
 
     func lock() -> Bool {
         lockCount += 1
-        lockedState = true
-        return true
+        if lockSucceeds { lockedState = true }
+        return lockSucceeds
     }
     func isScreenLocked() -> Bool { lockedState }
 }
@@ -69,12 +73,16 @@ final class SpyUnlocker: UnlockTriggering {
     /// 모든 가짜를 묶어서 컨트롤러를 조립한다. now는 고정 시각으로 주입.
     private func makeController(
         settings: Settings,
-        scanner: FakeScanner = FakeScanner(),
+        scanner: FakeScanner? = nil,
         locker: SpyScreenLocker = SpyScreenLocker(),
         overlay: SpyOverlay? = nil,
         waker: SpyWaker = SpyWaker(),
         unlocker: SpyUnlocker = SpyUnlocker()
     ) -> ProximityController {
+        // FakeScanner/SpyOverlay are @MainActor (ProximityScanning is now
+        // MainActor-isolated), so they can't be evaluated as default arguments
+        // in a nonisolated context — construct them here inside the suite.
+        let scanner = scanner ?? FakeScanner()
         let overlay = overlay ?? SpyOverlay()
         let c = ProximityController(
             scanner: scanner,
@@ -239,6 +247,153 @@ final class SpyUnlocker: UnlockTriggering {
 
         #expect(unlocker.attemptCount == 1)
         #expect(waker.wakeCount == 0)
+    }
+
+    // 7c. 화면 잠김+강신호+autoUnlock on이지만 attempt 실패(.noPassword)
+    //     → fallback으로 화면을 깨운다(회귀 방지: 검은 화면 방치 금지).
+    @Test func unlockFailureFallsBackToWake() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.wakeOnProximity = true
+        settings.autoUnlock = true
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -40, ageSeconds: 1)]
+        let locker = SpyScreenLocker()
+        locker.lockedState = true
+        let waker = SpyWaker()
+        let unlocker = SpyUnlocker()
+        unlocker.result = .noPassword
+        let c = makeController(settings: settings, scanner: scanner, locker: locker, waker: waker, unlocker: unlocker)
+
+        c.evaluate()
+
+        #expect(unlocker.attemptCount == 1)
+        #expect(waker.wakeCount == 1)   // 실패 → fallback wake
+    }
+
+    // 7d. attempt 성공(.dispatched) → fallback wake 없음.
+    @Test func unlockDispatchedSkipsFallbackWake() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.wakeOnProximity = true
+        settings.autoUnlock = true
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -40, ageSeconds: 1)]
+        let locker = SpyScreenLocker()
+        locker.lockedState = true
+        let waker = SpyWaker()
+        let unlocker = SpyUnlocker()
+        unlocker.result = .dispatched
+        let c = makeController(settings: settings, scanner: scanner, locker: locker, waker: waker, unlocker: unlocker)
+
+        c.evaluate()
+
+        #expect(unlocker.attemptCount == 1)
+        #expect(waker.wakeCount == 0)   // 성공 → fallback 불필요
+    }
+
+    // 10a. 토글을 끄면 직전 RSSI(bestSeen)가 UI에 남지 않도록 nil로 정리된다.
+    @Test func disablingClearsBestSeen() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 1)]
+        let c = makeController(settings: settings, scanner: scanner)
+
+        c.evaluate()
+        #expect(c.bestSeen != nil)   // near 상태로 채워짐
+
+        settings.enabled = false
+        c.evaluate()
+        #expect(c.bestSeen == nil)   // 비활성화 시 정리
+    }
+
+    // 10b. 등록 디바이스를 모두 제거하면 bestSeen이 정리된다.
+    @Test func removingDevicesClearsBestSeen() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 1)]
+        let c = makeController(settings: settings, scanner: scanner)
+
+        c.evaluate()
+        #expect(c.bestSeen != nil)
+
+        settings.removeDevice(id: deviceID)
+        c.evaluate()
+        #expect(c.bestSeen == nil)
+    }
+
+    // 10c. 토글 OFF 즉시(다음 evaluate 전) bestSeen/state/status가 정리된다.
+    //      ($enabled sink가 stopScanning만 하고 UI 상태를 안 지우면 1초간 stale RSSI 노출)
+    @Test func disablingImmediatelyClearsUIState() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 1)]
+        let overlay = SpyOverlay()
+        let c = makeController(settings: settings, scanner: scanner, overlay: overlay)
+
+        c.evaluate()
+        #expect(c.bestSeen != nil)
+        #expect(c.state == .near)
+
+        // 토글만 끄고 evaluate는 호출하지 않는다 — sink가 즉시 정리해야 한다.
+        settings.enabled = false
+
+        #expect(c.bestSeen == nil)
+        #expect(c.state == .unknown)
+        #expect(c.status == .idle)
+    }
+
+    // 9a. lock() 실패 → status는 .lockFailed (성공 잠금으로 위장 금지).
+    @Test func lockFailureReportsLockFailed() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.gracePeriodSeconds = 15      // absence point = 30
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 31)]
+        let locker = SpyScreenLocker()
+        locker.lockSucceeds = false
+        let c = makeController(settings: settings, scanner: scanner, locker: locker)
+
+        c.evaluate()
+
+        #expect(locker.lockCount == 1)
+        if case .lockFailed = c.status {} else {
+            Issue.record("expected .lockFailed, got \(c.status)")
+        }
+    }
+
+    // 9b. lock() 계속 실패 → 다음 tick에서도 재시도(백오프 없음).
+    @Test func lockFailureRetriesNextTick() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.gracePeriodSeconds = 15
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 31)]
+        let locker = SpyScreenLocker()
+        locker.lockSucceeds = false
+        let c = makeController(settings: settings, scanner: scanner, locker: locker)
+
+        c.evaluate()
+        c.evaluate()
+
+        #expect(locker.lockCount == 2)   // 매 tick 재시도
     }
 
     // 8. settings.enabled 토글 → scanner.start/stopScanning ($enabled sink)

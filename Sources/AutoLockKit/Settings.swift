@@ -2,6 +2,12 @@ import Foundation
 import Combine
 import AutoLockCore
 
+// MainActor-isolated: Settings is an ObservableObject driving SwiftUI and is
+// only ever read/written from the main actor (MenuView, the @MainActor
+// ProximityController, and BLEScanner's main-queue callbacks). Isolating it
+// makes the `shared` singleton concurrency-safe under Swift 6 without bolting
+// on locks that wouldn't match the observable model.
+@MainActor
 public final class Settings: ObservableObject {
     public static let shared = Settings()
 
@@ -24,13 +30,32 @@ public final class Settings: ObservableObject {
     }
     /// Slider exposes the magnitude (positive); the actual RSSI threshold is the negation.
     /// Range: 40~100 in 10-step increments.
-    @Published public var thresholdMagnitude: Int {
-        didSet { defaults.set(thresholdMagnitude, forKey: Keys.thresholdMagnitude) }
+    ///
+    /// Backed by a private `@Published` so the *only* value ever stored or
+    /// published is already clamped — a computed `didSet`-clamp would transiently
+    /// publish the raw out-of-range value first. The objectWillChange plumbing
+    /// is forwarded manually so SwiftUI still re-renders.
+    private var _thresholdMagnitude: Int
+    public var thresholdMagnitude: Int {
+        get { _thresholdMagnitude }
+        set {
+            let clamped = LockSettingBounds.clampThresholdMagnitude(newValue)
+            objectWillChange.send()
+            _thresholdMagnitude = clamped
+            defaults.set(clamped, forKey: Keys.thresholdMagnitude)
+        }
     }
     /// Maximum advertising silence we tolerate before starting the countdown.
-    /// Range: 15~60s in 1s steps.
-    @Published public var gracePeriodSeconds: Int {
-        didSet { defaults.set(gracePeriodSeconds, forKey: Keys.gracePeriod) }
+    /// Range: 15~60s in 1s steps. Same clamp-before-publish guarantee as above.
+    private var _gracePeriodSeconds: Int
+    public var gracePeriodSeconds: Int {
+        get { _gracePeriodSeconds }
+        set {
+            let clamped = LockSettingBounds.clampGracePeriodSeconds(newValue)
+            objectWillChange.send()
+            _gracePeriodSeconds = clamped
+            defaults.set(clamped, forKey: Keys.gracePeriod)
+        }
     }
 
     public var rssiThreshold: Int { -thresholdMagnitude }
@@ -56,10 +81,11 @@ public final class Settings: ObservableObject {
         self.enabled = defaults.object(forKey: Keys.enabled) as? Bool ?? false
         self.wakeOnProximity = defaults.object(forKey: Keys.wakeOnProximity) as? Bool ?? true
         self.autoUnlock = defaults.object(forKey: Keys.autoUnlock) as? Bool ?? false
-        let storedMag = defaults.object(forKey: Keys.thresholdMagnitude) as? Int ?? 100
-        self.thresholdMagnitude = min(100, max(40, storedMag))
+        let storedMag = defaults.object(forKey: Keys.thresholdMagnitude) as? Int
+            ?? LockSettingBounds.defaultThresholdMagnitude
+        self._thresholdMagnitude = LockSettingBounds.clampThresholdMagnitude(storedMag)
         let storedGrace = defaults.object(forKey: Keys.gracePeriod) as? Int ?? 15
-        self.gracePeriodSeconds = min(LockTuning.maxGracePeriodSeconds, max(15, storedGrace))
+        self._gracePeriodSeconds = LockSettingBounds.clampGracePeriodSeconds(storedGrace)
     }
 
     /// Only one device is supported at a time. Replacing keeps the UI simple

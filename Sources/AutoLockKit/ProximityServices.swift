@@ -24,9 +24,12 @@ public protocol UnlockTriggering {
 }
 
 /// BLE 스캐너 추상화. BLEScanner가 conform한다.
+/// MainActor 격리: 실제 구현(BLEScanner)이 CoreBluetooth queue:.main에서 동작하고
+/// Settings(MainActor)를 읽으므로, 스캐너 계약 전체를 main actor로 맞춘다.
+@MainActor
 public protocol ProximityScanning: AnyObject {
     var devices: [UUID: DiscoveredDevice] { get }
-    var gracePeriodProvider: () -> Int { get set }
+    var gracePeriodProvider: @MainActor () -> Int { get set }
     func startScanning()
     func stopScanning()
 }

@@ -19,8 +19,13 @@ public enum WakeDecision {
         rssiThreshold: Int
     ) -> WakeAction {
         guard wakeOnProximity else { return .doNothing }
-        guard !alreadyFired else { return .doNothing }
+        // The screen-unlocked check MUST precede the alreadyFired check: once we
+        // fired for a lock session and the user then unlocks, we have to re-arm
+        // (`.armForNextLock`) so the *next* lock can wake/auto-unlock again.
+        // Ordering alreadyFired first would latch forever — the second lock
+        // session onward would silently never fire.
         guard isScreenLocked else { return .armForNextLock }
+        guard !alreadyFired else { return .doNothing }
         guard let rssi = bestRssi, rssi >= Double(rssiThreshold) + LockTuning.wakeMarginDBm else { return .doNothing }
         return autoUnlock ? .attemptUnlock : .wakeDisplay
     }

@@ -6,7 +6,10 @@ import Foundation
 // SwiftUI App 프로토콜은 static func main()을 자동 제공하므로 수동 호출이 가능하다.
 let args = Array(CommandLine.arguments.dropFirst())
 if args.first == "diagnose" {
-    Diagnostics.run(Array(args.dropFirst()))
+    // Process entry runs on the main thread; Diagnostics is @MainActor.
+    MainActor.assumeIsolated {
+        Diagnostics.run(Array(args.dropFirst()))
+    }
 } else {
     AutoLockApp.main()
 }

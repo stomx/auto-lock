@@ -37,4 +37,8 @@ public enum ControllerStatus: Equatable {
     case countdown(reason: LockReason, secondsLeft: Int)
     case instantLock(reason: LockReason)
     case locked(reason: LockReason)
+    /// `ScreenLocking.lock()` reported failure (e.g. the private lock symbol
+    /// was unavailable). We must NOT present this as a successful lock; the
+    /// controller keeps retrying on subsequent ticks.
+    case lockFailed(reason: LockReason)
 }

@@ -8,6 +8,11 @@ import AutoLockCore
 /// 카운트다운 오버레이, 화면 잠금 상태/잠금)를 격리 실행해 "기능이 실제로
 /// 동작하는지"를 사람이 눈/콘솔로 확인하기 위한 도구다. 제품 로직과 무관하며
 /// 부수효과만 발생시킨다.
+///
+/// MainActor 격리: BLEScanner/CountdownOverlay/NSApplication 등 메인 액터 전용
+/// 객체를 직접 다루고, 진입점(main.swift 최상위)도 메인에서 호출하므로 전체를
+/// main actor로 둔다. 덕분에 산재하던 `MainActor.assumeIsolated`도 제거된다.
+@MainActor
 enum Diagnostics {
     /// 진단 진입점. main.swift에서 "diagnose" 이후 인자를 받아 호출된다.
     /// 각 서브커맨드는 내부에서 exit()를 호출하므로 이 함수는 정상적으로 반환하지 않는다.
@@ -83,9 +88,12 @@ enum Diagnostics {
             printScanSnapshot(scanner: scanner, elapsed: tick, total: Int(seconds))
         }
 
+        // Snapshot BEFORE stopping: stopScanning() now clears the discovered
+        // device map (so a re-enabled scanner can't act on stale entries), which
+        // would otherwise zero out this diagnostic's results.
+        let devices = Array(scanner.devices.values)
         scanner.stopScanning()
 
-        let devices = Array(scanner.devices.values)
         print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("스캔 종료. 블루투스 상태: \(stateDescription(scanner.bluetoothState))")
         print("발견 기기 수: \(devices.count)개")
@@ -111,7 +119,8 @@ enum Diagnostics {
     private static func printScanSnapshot(scanner: BLEScanner, elapsed: Int, total: Int) {
         let devices = scanner.devices.values.sorted { $0.smoothedRssi > $1.smoothedRssi }
         print("[\(elapsed)/\(total)초] 상태=\(stateDescription(scanner.bluetoothState)) 스캔중=\(scanner.isScanning) 기기=\(devices.count)개")
-        let now = Date()
+        // lastSeen이 monotonic 인스턴트이므로 age도 같은 클럭으로 계산해야 한다.
+        let now = MonotonicClock.now()
         for device in devices {
             let age = now.timeIntervalSince(device.lastSeen)
             let rssi = String(format: "%.1f", device.smoothedRssi)
@@ -146,18 +155,16 @@ enum Diagnostics {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
 
-        let deadline = Date().addingTimeInterval(seconds)
-        // CountdownOverlay는 @MainActor 싱글톤이라 메인 스레드에서 접근한다.
-        // 여기는 이미 메인 스레드이므로 MainActor.assumeIsolated로 동기 호출한다.
-        MainActor.assumeIsolated {
-            CountdownOverlay.shared.show(until: deadline)
-        }
+        // CountdownOverlay measures its deadline against MonotonicClock, so the
+        // overlay deadline must use the same clock. The RunLoop wait, however,
+        // is a real-time wait and stays on the wall clock.
+        let overlayDeadline = MonotonicClock.now().addingTimeInterval(seconds)
+        // Diagnostics 전체가 @MainActor라 CountdownOverlay 싱글톤을 직접 호출한다.
+        CountdownOverlay.shared.show(until: overlayDeadline)
 
-        RunLoop.main.run(until: deadline)
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
 
-        MainActor.assumeIsolated {
-            CountdownOverlay.shared.hide()
-        }
+        CountdownOverlay.shared.hide()
         print("✅ 오버레이 종료.")
         exit(0)
     }
