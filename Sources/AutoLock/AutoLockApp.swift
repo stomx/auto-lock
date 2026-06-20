@@ -29,7 +29,8 @@ struct AutoLockApp: App {
             currentVersion: Self.currentVersion,
             checker: GitHubUpdateClient(),
             downloader: DownloadClient(),
-            opener: SystemDMGOpener()
+            opener: SystemDMGOpener(),
+            selfUpdater: SelfUpdateInstaller()
         ))
     }
 

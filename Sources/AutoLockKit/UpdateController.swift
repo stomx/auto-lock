@@ -10,6 +10,9 @@ public enum UpdateError: Error, Equatable {
     case downloadFailed(String)
     case checksumMismatch
     case openFailed(String)
+    case noZipAsset                  // self-update needs a .zip; release has none
+    case unpackFailed(String)        // ditto -x failed / no .app inside
+    case replaceFailed(String)       // couldn't spawn the swap helper
 }
 
 // MARK: - Injected system boundaries
@@ -33,6 +36,25 @@ public protocol DMGOpening {
     func open(_ fileURL: URL) throws
 }
 
+/// Performs an in-place self-update: download the release ZIP, verify it,
+/// unpack it, swap the running app bundle, and relaunch — terminating this
+/// process so a detached helper can finish the swap. Implemented in the
+/// executable (it touches the filesystem, spawns a process, and calls
+/// `NSApp.terminate`).
+@MainActor
+public protocol SelfReplacing {
+    /// Whether the running app can replace itself in place — false when it's
+    /// translocated (read-only Gatekeeper copy), the bundle isn't writable, or
+    /// the release ships no ZIP. The controller routes to the manual-install
+    /// fallback when this is false.
+    func canSelfUpdate(_ release: ReleaseInfo) -> Bool
+    /// Download + verify + unpack + swap + relaunch. On success it spawns the
+    /// detached helper and terminates the app, so it normally does not return.
+    /// Throws (without terminating) if any step fails, so the controller can
+    /// surface the error.
+    func installAndRelaunch(_ release: ReleaseInfo) async throws
+}
+
 // MARK: - State
 
 public enum UpdateState: Equatable {
@@ -41,7 +63,9 @@ public enum UpdateState: Equatable {
     case upToDate
     case available(ReleaseInfo)
     case downloading(ReleaseInfo)
-    case opened(ReleaseInfo)         // DMG mounted; user finishes the drag-install
+    case installing(ReleaseInfo)     // bundle swap + relaunch in progress (app about to quit)
+    case unsupported(ReleaseInfo)    // can't self-update here; offer manual install
+    case opened(ReleaseInfo)         // DMG mounted; user finishes the drag-install (fallback)
     case failed(String)              // human-readable reason
 }
 
@@ -64,7 +88,11 @@ public final class UpdateController: ObservableObject {
     private let checker: UpdateChecking
     private let downloader: UpdateDownloading
     private let opener: DMGOpening
-    /// True while a check or download/open is in flight. Guards against
+    /// The in-place self-updater. Optional so older wiring (and tests that only
+    /// exercise the DMG path) can omit it — when nil, the controller always
+    /// uses the manual DMG-open fallback.
+    private let selfUpdater: SelfReplacing?
+    /// True while a check or download/install is in flight. Guards against
     /// re-entrancy: a second concurrent call would otherwise run a redundant
     /// network request and let a late completion overwrite newer state.
     private var isBusy = false
@@ -73,12 +101,14 @@ public final class UpdateController: ObservableObject {
         currentVersion: SemanticVersion,
         checker: UpdateChecking,
         downloader: UpdateDownloading,
-        opener: DMGOpening
+        opener: DMGOpening,
+        selfUpdater: SelfReplacing? = nil
     ) {
         self.currentVersion = currentVersion
         self.checker = checker
         self.downloader = downloader
         self.opener = opener
+        self.selfUpdater = selfUpdater
     }
 
     /// Convenience: the release the user can update to, if any.
@@ -124,6 +154,33 @@ public final class UpdateController: ObservableObject {
         }
     }
 
+    /// Self-update: download the ZIP, verify, swap the bundle in place, and
+    /// relaunch. No-op unless we're in `.available` and idle. Routes to the
+    /// manual DMG fallback (`.unsupported`) when the app can't replace itself
+    /// here (translocated / read-only / no ZIP / no self-updater wired). On
+    /// success the app terminates, so this normally doesn't return.
+    public func downloadAndInstall() async {
+        guard !isBusy, case .available(let release) = state else { return }
+
+        // No self-updater, or this install location can't be replaced → hand
+        // off to the manual DMG path so the user still has a way forward.
+        guard let selfUpdater, selfUpdater.canSelfUpdate(release) else {
+            state = .unsupported(release)
+            return
+        }
+
+        isBusy = true
+        defer { isBusy = false }
+
+        state = .installing(release)
+        do {
+            // Spawns the detached helper and terminates the app on success.
+            try await selfUpdater.installAndRelaunch(release)
+        } catch {
+            state = .failed(Self.describe(error))
+        }
+    }
+
     private static func describe(_ error: Error) -> String {
         if let e = error as? UpdateError {
             switch e {
@@ -132,6 +189,9 @@ public final class UpdateController: ObservableObject {
             case .downloadFailed(let m): return "다운로드 실패: \(m)"
             case .checksumMismatch:      return "체크섬 불일치 — 손상된 다운로드"
             case .openFailed(let m):     return "DMG 열기 실패: \(m)"
+            case .noZipAsset:            return "릴리스에 자동 업데이트용 ZIP이 없습니다"
+            case .unpackFailed(let m):   return "압축 해제 실패: \(m)"
+            case .replaceFailed(let m):  return "앱 교체 실패: \(m)"
             }
         }
         return (error as NSError).localizedDescription

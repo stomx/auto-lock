@@ -8,13 +8,29 @@ public struct ReleaseInfo: Equatable, Sendable {
     public let dmgURL: URL                 // the arm64 .dmg download
     public let dmgFileName: String         // e.g. "AutoLock-0.3.2-arm64.dmg"
     public let checksumsURL: URL?          // SHA256SUMS.txt, if published
+    // The arm64 .zip — preferred by the self-updater because it unpacks to a
+    // bundle with no mount/detach (unlike the DMG). Optional so a DMG-only
+    // release still parses (the v0.4.0 client and the manual-install fallback
+    // continue to work off `dmgURL`).
+    public let zipURL: URL?                // the arm64 .zip download
+    public let zipFileName: String?        // e.g. "AutoLock-0.3.2-arm64.zip"
 
-    public init(tag: String, version: SemanticVersion, dmgURL: URL, dmgFileName: String, checksumsURL: URL?) {
+    public init(
+        tag: String,
+        version: SemanticVersion,
+        dmgURL: URL,
+        dmgFileName: String,
+        checksumsURL: URL?,
+        zipURL: URL? = nil,
+        zipFileName: String? = nil
+    ) {
         self.tag = tag
         self.version = version
         self.dmgURL = dmgURL
         self.dmgFileName = dmgFileName
         self.checksumsURL = checksumsURL
+        self.zipURL = zipURL
+        self.zipFileName = zipFileName
     }
 
     /// Decode a `releases/latest` JSON body. Returns nil when the tag isn't a
@@ -43,6 +59,13 @@ public struct ReleaseInfo: Equatable, Sendable {
             return nil
         }
 
+        // The arm64 zip, if any (same arch-preference as the dmg). Optional —
+        // its absence just means the self-updater can't run and we fall back to
+        // the dmg manual-install path.
+        let zips = payload.assets.filter { $0.name.hasSuffix(".zip") }
+        let zip = zips.first(where: { $0.name.contains("arm64") }) ?? zips.first
+        let zipURL = zip.flatMap { URL(string: $0.browser_download_url) }
+
         let checksums = payload.assets
             .first(where: { $0.name == "SHA256SUMS.txt" })
             .flatMap { URL(string: $0.browser_download_url) }
@@ -52,7 +75,9 @@ public struct ReleaseInfo: Equatable, Sendable {
             version: version,
             dmgURL: dmgURL,
             dmgFileName: dmg.name,
-            checksumsURL: checksums
+            checksumsURL: checksums,
+            zipURL: zipURL,
+            zipFileName: zip?.name
         )
     }
 }

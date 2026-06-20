@@ -412,7 +412,9 @@ struct MenuView: View {
         switch updateController.state {
         case .available(let release):
             Button {
-                Task { await updateController.downloadAndOpen() }
+                // 다운로드→검증→번들 교체→재실행까지 자동. 자가교체 불가 위치면
+                // 컨트롤러가 .unsupported로 떨어뜨려 수동 안내를 보여준다.
+                Task { await updateController.downloadAndInstall() }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.down.circle.fill")
@@ -437,6 +439,31 @@ struct MenuView: View {
                     .font(AppFont.pretendard(13, weight: .medium))
                     .foregroundStyle(Palette.muted)
                 Spacer()
+            }
+
+        case .installing:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("앱을 교체하고 다시 시작합니다…")
+                    .font(AppFont.pretendard(13, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                Spacer()
+            }
+
+        case .unsupported(let release):
+            // 자가교체 불가(번들 쓰기 불가 / translocation). DMG 수동 설치로 폴백.
+            VStack(alignment: .leading, spacing: 6) {
+                Text("자동 교체를 할 수 없는 위치입니다")
+                    .font(AppFont.pretendard(13, weight: .semibold))
+                    .foregroundStyle(Palette.label)
+                Text("AutoLock을 Applications 폴더에 설치한 뒤 다시 시도하거나, 아래에서 직접 받으세요.")
+                    .font(AppFont.pretendard(13))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("\(release.tag) DMG 받기") {
+                    Task { await updateController.downloadAndOpen() }
+                }
+                .buttonStyle(GhostButtonStyle())
             }
 
         case .opened(let release):

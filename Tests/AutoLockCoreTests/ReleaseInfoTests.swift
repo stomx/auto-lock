@@ -24,7 +24,7 @@ import Foundation
         """.data(using: .utf8)!
     }
 
-    // 1. tag + dmg + checksums URL을 모두 뽑는다.
+    // 1. tag + dmg + zip + checksums URL을 모두 뽑는다.
     @Test func parsesAllFields() throws {
         let r = try #require(ReleaseInfo.parse(fixture()))
         #expect(r.version == SemanticVersion("0.3.2"))
@@ -32,6 +32,33 @@ import Foundation
         #expect(r.dmgURL.absoluteString == "https://example.com/AutoLock-0.3.2-arm64.dmg")
         #expect(r.dmgFileName == "AutoLock-0.3.2-arm64.dmg")
         #expect(r.checksumsURL?.absoluteString == "https://example.com/SHA256SUMS.txt")
+        #expect(r.zipURL?.absoluteString == "https://example.com/AutoLock-0.3.2-arm64.zip")
+        #expect(r.zipFileName == "AutoLock-0.3.2-arm64.zip")
+    }
+
+    // 1b. arm64 zip을 우선 추출(self-update용). arm64가 없으면 첫 zip 폴백.
+    @Test func extractsArm64Zip() throws {
+        let json = """
+        { "tag_name": "v0.3.2", "assets": [
+          { "name": "AutoLock-0.3.2-arm64.dmg", "browser_download_url": "https://e.com/a.dmg" },
+          { "name": "AutoLock-0.3.2-x86_64.zip", "browser_download_url": "https://e.com/x64.zip" },
+          { "name": "AutoLock-0.3.2-arm64.zip", "browser_download_url": "https://e.com/arm64.zip" }
+        ] }
+        """.data(using: .utf8)!
+        let r = try #require(ReleaseInfo.parse(json))
+        #expect(r.zipFileName == "AutoLock-0.3.2-arm64.zip")
+    }
+
+    // 1c. zip이 없어도 dmg가 있으면 파싱 성공(하위호환). zip 필드는 nil.
+    @Test func zipOptionalForBackwardCompat() throws {
+        let json = """
+        { "tag_name": "v0.3.2", "assets": [
+          { "name": "AutoLock-0.3.2-arm64.dmg", "browser_download_url": "https://e.com/a.dmg" }
+        ] }
+        """.data(using: .utf8)!
+        let r = try #require(ReleaseInfo.parse(json))
+        #expect(r.zipURL == nil)
+        #expect(r.zipFileName == nil)
     }
 
     // 2. zip이 아니라 dmg를 고른다(arm64 dmg 우선).

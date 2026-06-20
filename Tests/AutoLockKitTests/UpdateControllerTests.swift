@@ -57,6 +57,20 @@ final class SpyDMGOpener: DMGOpening {
     }
 }
 
+@MainActor
+final class SpySelfReplacing: SelfReplacing {
+    var canUpdate = true
+    var shouldThrow = false
+    private(set) var installCount = 0
+    func canSelfUpdate(_ release: ReleaseInfo) -> Bool { canUpdate }
+    func installAndRelaunch(_ release: ReleaseInfo) async throws {
+        installCount += 1
+        if shouldThrow { throw UpdateError.replaceFailed("spy") }
+        // Real impl terminates the app here; the spy just records the call and
+        // returns, leaving the controller in .installing.
+    }
+}
+
 struct StubError: Error {}
 
 // MARK: - 테스트
@@ -74,17 +88,32 @@ struct StubError: Error {}
         )
     }
 
+    /// Release that also carries a zip asset, so self-update is possible.
+    private func releaseWithZip(_ tag: String) -> ReleaseInfo {
+        ReleaseInfo(
+            tag: tag,
+            version: SemanticVersion(tag)!,
+            dmgURL: URL(string: "https://e.com/AutoLock-\(tag.dropFirst())-arm64.dmg")!,
+            dmgFileName: "AutoLock-\(tag.dropFirst())-arm64.dmg",
+            checksumsURL: URL(string: "https://e.com/SHA256SUMS.txt")!,
+            zipURL: URL(string: "https://e.com/AutoLock-\(tag.dropFirst())-arm64.zip")!,
+            zipFileName: "AutoLock-\(tag.dropFirst())-arm64.zip"
+        )
+    }
+
     private func makeController(
         current: String = "0.3.1",
         checker: UpdateChecking,
         downloader: UpdateDownloading? = nil,
-        opener: SpyDMGOpener? = nil
+        opener: SpyDMGOpener? = nil,
+        selfUpdater: SelfReplacing? = nil
     ) -> UpdateController {
         UpdateController(
             currentVersion: SemanticVersion(current)!,
             checker: checker,
             downloader: downloader ?? FakeDownloader(.success(URL(fileURLWithPath: "/tmp/a.dmg"))),
-            opener: opener ?? SpyDMGOpener()
+            opener: opener ?? SpyDMGOpener(),
+            selfUpdater: selfUpdater
         )
     }
 
@@ -164,5 +193,55 @@ struct StubError: Error {}
         let n = await gated.count()
         #expect(n == 1)                        // checker는 한 번만 호출
         #expect(c.state == .available(release("v0.3.2")))
+    }
+
+    // MARK: self-update 흐름
+
+    // 9. self-updater가 있고 교체 가능하면 downloadAndInstall → installing + 1회 호출.
+    @Test func installSucceedsEntersInstalling() async {
+        let su = SpySelfReplacing()
+        let c = makeController(checker: FakeUpdateChecker(.success(releaseWithZip("v0.3.2"))), selfUpdater: su)
+        await c.check()
+        await c.downloadAndInstall()
+        #expect(su.installCount == 1)
+        if case .installing = c.state {} else { Issue.record("expected .installing, got \(c.state)") }
+    }
+
+    // 10. 교체 불가 위치(canSelfUpdate=false) → unsupported, 설치 시도 안 함.
+    @Test func installUnsupportedWhenCannotReplace() async {
+        let su = SpySelfReplacing(); su.canUpdate = false
+        let c = makeController(checker: FakeUpdateChecker(.success(releaseWithZip("v0.3.2"))), selfUpdater: su)
+        await c.check()
+        await c.downloadAndInstall()
+        #expect(su.installCount == 0)
+        if case .unsupported = c.state {} else { Issue.record("expected .unsupported, got \(c.state)") }
+    }
+
+    // 11. self-updater 미주입 → unsupported(폴백 경로).
+    @Test func installUnsupportedWhenNoSelfUpdater() async {
+        let c = makeController(checker: FakeUpdateChecker(.success(releaseWithZip("v0.3.2"))))
+        await c.check()
+        await c.downloadAndInstall()
+        if case .unsupported = c.state {} else { Issue.record("expected .unsupported, got \(c.state)") }
+    }
+
+    // 12. 설치 중 실패 → failed.
+    @Test func installFailureReportsFailed() async {
+        let su = SpySelfReplacing(); su.shouldThrow = true
+        let c = makeController(checker: FakeUpdateChecker(.success(releaseWithZip("v0.3.2"))), selfUpdater: su)
+        await c.check()
+        await c.downloadAndInstall()
+        #expect(su.installCount == 1)
+        if case .failed = c.state {} else { Issue.record("expected .failed, got \(c.state)") }
+    }
+
+    // 13. available 아닐 때 downloadAndInstall은 무시(설치 시도 안 함).
+    @Test func installIgnoredWhenNotAvailable() async {
+        let su = SpySelfReplacing()
+        let c = makeController(checker: FakeUpdateChecker(.success(release("v0.3.1"))), selfUpdater: su)
+        await c.check()                  // upToDate
+        await c.downloadAndInstall()     // 무시
+        #expect(su.installCount == 0)
+        #expect(c.state == .upToDate)
     }
 }
