@@ -3,6 +3,31 @@
 이 프로젝트의 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를
 따르고, 버전 번호는 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.4.0] — 2026-06-20
+
+### Added
+- **GitHub Releases 기반 자동 업데이트.** 앱 시작 시(및 메뉴 버전 클릭 시) 최신
+  릴리스를 확인하고, 새 버전이 있으면 메뉴에 업데이트 버튼을 노출합니다. 누르면
+  `arm64` DMG를 내려받아 **`SHA256SUMS.txt`와 대조 검증(fail-closed)** 후 디스크
+  이미지를 엽니다. 체크섬 자산 누락·엔트리 누락·불일치·다운로드 실패는 모두
+  업데이트를 중단합니다. ad-hoc 서명 빌드라 앱 자가교체는 하지 않고 "다운로드·
+  검증·열기"까지만 자동화하며, 마지막 드래그 설치는 사용자가 수행합니다.
+  - 결정 로직은 전부 `AutoLockCore` 순수 타입으로 분리: `SemanticVersion`(버전
+    파싱·비교), `ReleaseInfo`/`UpdateCheck`(릴리스 파싱·다운그레이드 거부),
+    `ChecksumVerifier`(fail-closed 검증). 컨트롤러(`UpdateController`)는
+    `@MainActor` 상태머신으로 재진입 가드를 두고, 시스템 경계(GitHub API·
+    URLSession 다운로드·NSWorkspace 열기)는 조립 루트에서 주입합니다.
+  - `diagnose update` 서브커맨드 — 제품 코드 그대로 조회→비교→다운로드→검증을
+    E2E 점검(`--current`로 가능 경로 강제, `--feed`로 픽스처 주입, `--download`/
+    `--open` 단계 선택).
+
+### Changed
+- **신호 끊김 허용 시간을 10초로 고정**하고 사용자 조정 슬라이더를 제거했습니다.
+  이전에는 15~60초 범위에서 조정 가능했으나, 고정 상수
+  (`LockTuning.fixedGracePeriodSeconds`)로 단순화했습니다. `Settings`의 grace
+  영속화·클램프 로직이 제거되고, plumbing(컨트롤러·BLE 프루너)은 그대로 이 값을
+  읽습니다.
+
 ## [0.3.1] — 2026-06-18
 
 v0.3.0(3계층 아키텍처 + 테스트 인프라 도입은 이미 0.3.0 범위) **이후** 코드
