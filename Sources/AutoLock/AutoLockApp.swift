@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import CoreBluetooth
 import AutoLockKit
+import AutoLockCore
 
 struct AutoLockApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -10,6 +11,7 @@ struct AutoLockApp: App {
     private let scanner: BLEScanner
     @StateObject private var controller: ProximityController
     @StateObject private var permissionObserver: PermissionObserver
+    @StateObject private var updateController: UpdateController
 
     init() {
         let scanner = BLEScanner()
@@ -23,15 +25,32 @@ struct AutoLockApp: App {
             unlocker: SystemUnlockTrigger()
         ))
         _permissionObserver = StateObject(wrappedValue: PermissionObserver(scanner: scanner))
+        _updateController = StateObject(wrappedValue: UpdateController(
+            currentVersion: Self.currentVersion,
+            checker: GitHubUpdateClient(),
+            downloader: DownloadClient(),
+            opener: SystemDMGOpener()
+        ))
     }
 
     var body: some Scene {
         MenuBarExtra {
-            MenuView(controller: controller, scanner: scanner)
+            MenuView(controller: controller, scanner: scanner, updateController: updateController)
+                .task {
+                    // 앱 시작 시 1회 자동 확인 (실패해도 조용히 무시 — 메뉴에 상태만 반영).
+                    await updateController.check()
+                }
         } label: {
             Image(systemName: controller.menuBarIcon)
         }
         .menuBarExtraStyle(.window)
+    }
+
+    /// Running version parsed from the bundle, for the updater's comparison.
+    /// Falls back to 0.0.0 so a malformed Info.plist never blocks launch.
+    private static var currentVersion: SemanticVersion {
+        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        return SemanticVersion(short) ?? SemanticVersion(major: 0, minor: 0, patch: 0)
     }
 }
 

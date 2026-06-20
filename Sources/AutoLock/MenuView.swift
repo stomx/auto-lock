@@ -14,6 +14,7 @@ struct MenuView: View {
     @ObservedObject var controller: ProximityController
     @ObservedObject private var scanner: BLEScanner
     @ObservedObject private var settings: AutoLockKit.Settings
+    @ObservedObject private var updateController: UpdateController
     @State private var launchAtLogin: Bool = LaunchAtLogin.isEnabled
     @State private var helpExpanded: Bool = false
     @State private var hasPassword: Bool = KeychainStore.hasPassword()
@@ -25,10 +26,11 @@ struct MenuView: View {
     /// password sheet, which refreshes the flag directly in its completion handler.
     private let permissionTimer = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect()
 
-    init(controller: ProximityController, scanner: BLEScanner) {
+    init(controller: ProximityController, scanner: BLEScanner, updateController: UpdateController) {
         self.controller = controller
         self.scanner = scanner
         self.settings = controller.settings
+        self.updateController = updateController
     }
 
     var body: some View {
@@ -39,6 +41,7 @@ struct MenuView: View {
             optionsCard
             helpCard
             footer
+            updateRow
             versionLabel
         }
         .padding(14)
@@ -400,12 +403,88 @@ struct MenuView: View {
         }
     }
 
+    // MARK: Update
+
+    /// Update status row. Stays quiet when up to date / checking; surfaces a
+    /// "new version" affordance when an update is available, progress while
+    /// downloading, and a guidance line once the DMG is mounted.
+    @ViewBuilder private var updateRow: some View {
+        switch updateController.state {
+        case .available(let release):
+            Button {
+                Task { await updateController.downloadAndOpen() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .font(.system(size: 12, weight: .bold))
+                    Text("새 버전 \(release.tag) — 업데이트")
+                        .font(AppFont.pretendard(13, weight: .bold))
+                }
+                .foregroundStyle(Palette.onLime)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Palette.lime)
+                )
+            }
+            .buttonStyle(.plain)
+
+        case .downloading:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("업데이트 다운로드 중…")
+                    .font(AppFont.pretendard(13, weight: .medium))
+                    .foregroundStyle(Palette.muted)
+                Spacer()
+            }
+
+        case .opened(let release):
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(release.tag) 디스크 이미지를 열었습니다")
+                    .font(AppFont.pretendard(13, weight: .semibold))
+                    .foregroundStyle(Palette.label)
+                Text("AutoLock을 Applications 폴더로 드래그한 뒤 앱을 다시 실행하세요.")
+                    .font(AppFont.pretendard(13))
+                    .foregroundStyle(Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+        case .failed(let reason):
+            HStack(spacing: 6) {
+                Text("업데이트 확인 실패: \(reason)")
+                    .font(AppFont.pretendard(13))
+                    .foregroundStyle(Palette.muted)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Button("다시 시도") { Task { await updateController.check() } }
+                    .buttonStyle(GhostButtonStyle())
+            }
+
+        case .idle, .checking, .upToDate:
+            EmptyView()
+        }
+    }
+
     private var versionLabel: some View {
         HStack {
+            // 최신 상태일 때만 "최신 버전" 표시 — 조용한 기본값.
+            if updateController.state == .upToDate {
+                Image(systemName: "checkmark.circle")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.dim)
+            }
             Spacer()
-            Text(Self.versionString)
-                .font(AppFont.pretendard(13))
-                .foregroundStyle(Palette.dim)
+            Button {
+                Task { await updateController.check() }
+            } label: {
+                Text(Self.versionString)
+                    .font(AppFont.pretendard(13))
+                    .foregroundStyle(Palette.dim)
+            }
+            .buttonStyle(.plain)
+            .help("클릭하면 업데이트를 확인합니다")
             Spacer()
         }
     }

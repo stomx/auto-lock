@@ -31,6 +31,8 @@ enum Diagnostics {
             runLockStatus()
         case "lock":
             runLock(rest)
+        case "update":
+            runUpdate(rest)
         case "help", "-h", "--help":
             printUsage()
             exit(0)
@@ -56,6 +58,10 @@ enum Diagnostics {
           overlay [초]   화면 중앙 카운트다운 오버레이 표시 (기본 5초)     [비파괴]
           lock-status    현재 화면 잠금 상태 출력                          [비파괴]
           lock [--yes]   화면을 즉시 잠금 (--yes 필수)                     [⚠️ 파괴적]
+          update [옵션]  업데이트 파이프라인 E2E 점검 (조회→비교→다운로드→검증)  [비파괴]
+                         --current <버전>  현재 버전을 가장해 "가능" 경로 강제 (예: 0.0.1)
+                         --download        DMG 다운로드 + SHA256 검증까지 수행
+                         --open            검증 후 DMG 열기(mount) 까지 (GUI)
           help           이 도움말 출력
 
         release 빌드 실행 예시:
@@ -205,6 +211,98 @@ enum Diagnostics {
         }
     }
 
+    // MARK: - update (비파괴: --download 시 임시폴더로만 받음)
+
+    /// 업데이트 파이프라인을 실제 GitHub/네트워크/DMG에 대해 끝까지 점검한다.
+    /// 제품 코드의 GitHubUpdateClient / DownloadClient / UpdateController를 그대로
+    /// 사용하므로 진짜 E2E다. 기본은 조회+버전비교까지(비파괴), --download 면 DMG
+    /// 다운로드+SHA256 검증, --open 이면 mount 까지.
+    private static func runUpdate(_ args: [String]) {
+        let doDownload = args.contains("--download") || args.contains("--open")
+        let doOpen = args.contains("--open")
+        // --current <ver> 파싱 (업데이트 "가능" 경로를 강제하기 위해 현재 버전 가장)
+        var currentRaw = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        if let i = args.firstIndex(of: "--current"), i + 1 < args.count {
+            currentRaw = args[i + 1]
+        }
+        guard let current = SemanticVersion(currentRaw) else {
+            print("❌ --current 버전 파싱 실패: \(currentRaw)")
+            exit(2)
+        }
+        // --feed <url> 로 릴리스 피드 출처를 바꾼다(로컬 픽스처/스테이징 테스트용).
+        var feedURL: URL? = nil
+        if let i = args.firstIndex(of: "--feed"), i + 1 < args.count {
+            guard let u = URL(string: args[i + 1]) else {
+                print("❌ --feed URL 파싱 실패: \(args[i + 1])")
+                exit(2)
+            }
+            feedURL = u
+        }
+
+        print("🔎 업데이트 점검 — 현재 버전 가정: v\(currentRaw)")
+        print("   피드: \(feedURL?.absoluteString ?? "github.com/stomx/auto-lock (releases/latest)")\n")
+
+        // --open 이 아니면 실제 mount 부작용을 피하려고 열기를 가로채는 더미 opener.
+        let opener: DMGOpening = doOpen ? SystemDMGOpener() : NoOpDMGOpener()
+        let checker = feedURL.map { GitHubUpdateClient(feedURL: $0) } ?? GitHubUpdateClient()
+        let controller = UpdateController(
+            currentVersion: current,
+            checker: checker,
+            downloader: DownloadClient(),
+            opener: opener
+        )
+
+        let done = DispatchSemaphore(value: 0)
+        Task { @MainActor in
+            // 1) 조회 + 비교
+            await controller.check()
+            switch controller.state {
+            case .upToDate:
+                print("✅ 최신 버전입니다 (업데이트 없음).")
+                done.signal()
+            case .failed(let reason):
+                print("❌ 확인 실패: \(reason)")
+                exitCode = 1
+                done.signal()
+            case .available(let release):
+                print("⬆️  새 버전 발견: \(release.tag)")
+                print("   DMG: \(release.dmgFileName)")
+                print("   체크섬: \(release.checksumsURL?.absoluteString ?? "(없음)")")
+                guard doDownload else {
+                    print("\n(다운로드/검증까지 보려면 --download, 열기까지는 --open)")
+                    done.signal()
+                    return
+                }
+                // 2) 다운로드 + SHA256 검증 (+ --open 시 mount)
+                print("\n⬇️  다운로드 + SHA256 검증\(doOpen ? " + DMG 열기" : "") 진행…")
+                await controller.downloadAndOpen()
+                switch controller.state {
+                case .opened(let r):
+                    print("✅ 다운로드·검증 통과. \(r.dmgFileName)\(doOpen ? " 를 열었습니다(mount)." : " 준비 완료.")")
+                case .failed(let reason):
+                    print("❌ 다운로드/검증 실패: \(reason)")
+                    exitCode = 1
+                default:
+                    print("⚠️ 예상치 못한 상태: \(controller.state)")
+                    exitCode = 1
+                }
+                done.signal()
+            default:
+                print("⚠️ 예상치 못한 상태: \(controller.state)")
+                exitCode = 1
+                done.signal()
+            }
+        }
+        // 메인 RunLoop을 돌려 async 작업이 진행되게 한다(CLI는 메인 스레드 동기 흐름).
+        while done.wait(timeout: .now()) == .timedOut {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        exit(exitCode)
+    }
+
+    /// runUpdate의 async 클로저에서 설정하는 종료 코드. 메인 스레드 전용.
+    private static var exitCode: Int32 = 0
+
     // MARK: - 헬퍼
 
     private static func stateDescription(_ state: CBManagerState) -> String {
@@ -217,5 +315,14 @@ enum Diagnostics {
         case .poweredOn: return "poweredOn(켜짐)"
         @unknown default: return "알수없음(\(state.rawValue))"
         }
+    }
+}
+
+/// `diagnose update`에서 실제 DMG mount 부작용 없이 다운로드·검증까지만 확인할 때
+/// 쓰는 더미 opener. open()은 경로만 출력하고 아무 것도 mount하지 않는다.
+@MainActor
+private struct NoOpDMGOpener: DMGOpening {
+    func open(_ fileURL: URL) throws {
+        print("   (열기 생략) 검증된 파일: \(fileURL.path)")
     }
 }
