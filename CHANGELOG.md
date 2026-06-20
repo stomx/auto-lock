@@ -3,6 +3,32 @@
 이 프로젝트의 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를
 따르고, 버전 번호는 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.5.0] — 2026-06-20
+
+### Added
+- **완전 자동 업데이트(자가교체).** 메뉴의 "업데이트" 버튼 한 번으로 새 버전
+  ZIP 다운로드 → SHA256 검증 → 앱 번들 교체 → 재실행까지 자동으로 끝납니다.
+  더 이상 DMG를 열어 수동으로 드래그할 필요가 없습니다.
+  - 분리 실행되는 헬퍼 스크립트가 앱 종료를 기다렸다가 번들을 교체하고
+    quarantine을 제거한 뒤 새 앱을 실행합니다(`SelfUpdatePlan`이 순수 로직으로
+    스크립트를 생성). 다운그레이드 거부·fail-closed 체크섬 검증은 그대로입니다.
+  - 자가교체가 불가능한 위치(App Translocation 상태, 쓰기 불가, ZIP 부재)는
+    `InstallLocation` 판정으로 감지해 기존 DMG 수동 설치로 자동 폴백합니다.
+  - `diagnose self-update [--dry-run|--apply]` 서브커맨드로 파이프라인 E2E 점검.
+
+### Changed
+- **코드서명을 ad-hoc → 고정 self-signed 인증서로 전환.** ad-hoc 서명은 빌드마다
+  코드 해시가 변해 macOS가 업데이트된 앱을 "다른 앱"으로 인식하고 접근성·블루투스
+  권한을 리셋했습니다. 고정 인증서로 서명하면 designated requirement가 인증서
+  leaf에 묶여, **업데이트 후에도 권한이 유지**됩니다(`release.sh`가 인증서 없으면
+  빌드 중단 + DR 검증 게이트). 인증서 생성은 `scripts/create_signing_cert.sh` 참고.
+
+### Upgrade notes
+- **v0.4.0 → v0.5.0**: 0.4.0 업데이터는 DMG-mount 방식이라 이번 한 번은 수동
+  드래그 설치가 필요합니다. 또한 ad-hoc → self-signed 전환으로 **블루투스·접근성
+  권한을 1회 다시 허용**해야 합니다. 이후 v0.5.0 → v0.5.1부터는 권한이 유지되며
+  자동 교체됩니다.
+
 ## [0.4.0] — 2026-06-20
 
 ### Added
