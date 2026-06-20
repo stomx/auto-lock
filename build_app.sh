@@ -32,8 +32,17 @@ cp "$BIN_PATH" "$APP_DIR/Contents/MacOS/$APP_NAME"
 cp "$ROOT/Resources/Info.plist" "$APP_DIR/Contents/Info.plist"
 cp "$ROOT/Resources/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
 
-echo "▶ Ad-hoc codesign (required for TCC prompts on Apple Silicon)"
-codesign --force --deep --sign - "$APP_DIR"
+# Dev build: prefer the self-signed cert (so permission behavior matches a
+# release), but fall back to ad-hoc when it's absent — local dev doesn't need
+# permission persistence. (release.sh hard-fails instead; see its comment.)
+SIGN_ID="${AUTOLOCK_SIGN_IDENTITY:-AutoLock Self-Signed}"
+if security find-identity -p codesigning | grep -q "$SIGN_ID"; then
+    echo "▶ Codesign with '$SIGN_ID'"
+    codesign --force --deep --sign "$SIGN_ID" "$APP_DIR"
+else
+    echo "⚠️ 인증서 '$SIGN_ID' 없음 — ad-hoc 서명(개발용). 자가교체 권한유지 테스트엔 부적합."
+    codesign --force --deep --sign - "$APP_DIR"
+fi
 
 echo
 echo "✅ Built: $APP_DIR"

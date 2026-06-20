@@ -19,3 +19,9 @@ Resources/AppIcon.iconset/
 
 # 작업 핸드오프 노트 — 로컬 전용, 커밋 금지.
 docs/00-HANDOFF.md
+
+# 코드서명 비밀키/인증서 — 절대 커밋 금지(.p12는 안전한 곳에 별도 백업).
+*.key
+*.crt
+*.p12
+.autolock-signing/
