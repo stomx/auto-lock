@@ -144,11 +144,11 @@ final class SpyUnlocker: UnlockTriggering {
     }
 
     // 4. age > absence point → 즉시 lock
+    //    grace 고정 10초 → absence point = 10*2 = 20초. age 31 > 20.
     @Test func staleAgeLocks() {
         let settings = makeSettings()
         settings.enabled = true
         settings.thresholdMagnitude = 70
-        settings.gracePeriodSeconds = 15      // absence point = 30
         settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
         let scanner = FakeScanner()
         scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 31)]
@@ -178,26 +178,26 @@ final class SpyUnlocker: UnlockTriggering {
     }
 
     // 6. grace 윈도우 final stretch → overlay.show(deadline)
+    //    grace 고정 10초, 오버레이 윈도우 마지막 5초.
     @Test func overlayWindowShows() {
         let settings = makeSettings()
         settings.enabled = true
         settings.thresholdMagnitude = 70      // threshold -70
-        settings.gracePeriodSeconds = 15
         settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
         let scanner = FakeScanner()
         // 약신호(-75)로 away 카운트다운 진입. 첫 evaluate에서 awaySince=now가 잡힌다.
-        // remaining = 15 → hideOverlay. overlay 표시를 보려면 awaySince가 과거여야 하므로
-        // 두 번 평가하되 두 번째 now를 앞당기는 대신, 신호 약함을 유지하고 now를 deadline 근처로.
+        // remaining = 10 → hideOverlay. overlay 표시를 보려면 awaySince가 과거여야 하므로
+        // now를 7초 앞으로 옮겨 remaining=3 (≤5)로 만든다.
         scanner.devices = [deviceID: discovered(rssi: -75, ageSeconds: 1)]
         let overlay = SpyOverlay()
         let c = makeController(settings: settings, scanner: scanner, overlay: overlay)
 
-        // 첫 평가: awaySince = now 설정 (remaining 15 → hideOverlay)
+        // 첫 평가: awaySince = now 설정 (remaining 10 → hideOverlay)
         c.evaluate()
-        // now를 12초 앞으로 옮겨 remaining=3 (≤5) → showOverlay
-        c.now = { [now] in now.addingTimeInterval(12) }
-        // lastSeen도 동일하게 최신화해 stale 분기로 빠지지 않게 한다(age는 13s < grace15).
-        scanner.devices = [deviceID: DiscoveredDevice(id: deviceID, name: "watch", smoothedRssi: -75, lastSeen: now.addingTimeInterval(11))]
+        // now를 7초 앞으로 옮겨 remaining=3 (≤5) → showOverlay
+        c.now = { [now] in now.addingTimeInterval(7) }
+        // lastSeen도 최신화해 stale 분기로 빠지지 않게 한다(age는 1s < grace10).
+        scanner.devices = [deviceID: DiscoveredDevice(id: deviceID, name: "watch", smoothedRssi: -75, lastSeen: now.addingTimeInterval(6))]
         c.evaluate()
 
         #expect(overlay.showCount >= 1)
@@ -361,8 +361,7 @@ final class SpyUnlocker: UnlockTriggering {
         let settings = makeSettings()
         settings.enabled = true
         settings.thresholdMagnitude = 70
-        settings.gracePeriodSeconds = 15      // absence point = 30
-        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))   // grace 고정 10 → absence 20
         let scanner = FakeScanner()
         scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 31)]
         let locker = SpyScreenLocker()
@@ -382,8 +381,7 @@ final class SpyUnlocker: UnlockTriggering {
         let settings = makeSettings()
         settings.enabled = true
         settings.thresholdMagnitude = 70
-        settings.gracePeriodSeconds = 15
-        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))   // grace 고정 10 → absence 20
         let scanner = FakeScanner()
         scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 31)]
         let locker = SpyScreenLocker()

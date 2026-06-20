@@ -233,18 +233,8 @@ struct MenuView: View {
                     step: 10,
                     accent: Palette.lime
                 )
-
-                ParameterDial(
-                    label: "신호 끊김 허용",
-                    valueText: "\(settings.gracePeriodSeconds)초",
-                    binding: Binding(
-                        get: { Double(settings.gracePeriodSeconds) },
-                        set: { settings.gracePeriodSeconds = Int($0.rounded()) }
-                    ),
-                    range: 15...60,
-                    step: 1,
-                    accent: Palette.amber
-                )
+                // 신호 끊김 허용은 10초 고정(LockTuning.fixedGracePeriodSeconds)이라
+                // 더 이상 조정 슬라이더를 노출하지 않는다.
             }
         }
     }

@@ -14,11 +14,24 @@ import Foundation
         #expect(LockTuning.pruneAfterSeconds(gracePeriodSeconds: 60) == 122.0)
     }
 
+    // 신호 끊김 허용은 더 이상 사용자 조정 항목이 아니라 10초 고정.
+    @Test func fixedGraceIsTenSeconds() {
+        #expect(LockTuning.fixedGracePeriodSeconds == 10)
+    }
+
+    // 고정 grace에서도 reachability 불변식이 성립해야 한다(pruner가 absence 이후 evict).
+    @Test func fixedGracePruneOutlivesAbsence() {
+        let grace = LockTuning.fixedGracePeriodSeconds
+        let absence = Double(grace) * LockTuning.absenceMultiplier
+        let prune = LockTuning.pruneAfterSeconds(gracePeriodSeconds: grace)
+        #expect(prune > absence)
+    }
+
     // #11: Reachability proof — the pruner must evict LATER than the absence
-    // (instant-lock) point for every supported grace value, otherwise the
+    // (instant-lock) point across the historical grace span, otherwise the
     // stale/absence branches in ProximityEvaluator are dead code.
     @Test func pruneAlwaysOutlivesAbsencePoint() {
-        for grace in 15...60 {
+        for grace in 10...60 {
             let absence = Double(grace) * LockTuning.absenceMultiplier
             let prune = LockTuning.pruneAfterSeconds(gracePeriodSeconds: grace)
             #expect(

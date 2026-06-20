@@ -13,10 +13,6 @@ public enum LockSettingBounds {
     /// negation). Matches the UI slider range 40...100.
     public static let thresholdMagnitudeRange: ClosedRange<Int> = 40...100
 
-    /// Grace period (advertising-silence tolerance) in seconds. Lower bound 15;
-    /// upper bound is the single source `LockTuning.maxGracePeriodSeconds`.
-    public static var gracePeriodRange: ClosedRange<Int> { 15...LockTuning.maxGracePeriodSeconds }
-
     /// Default lock-threshold magnitude for a fresh install: -80 dBm, the
     /// centre of the README's recommended -75~-85 range, so the very first
     /// tracked device locks/unlocks sensibly without tuning. (The old default
@@ -25,10 +21,5 @@ public enum LockSettingBounds {
 
     public static func clampThresholdMagnitude(_ value: Int) -> Int {
         min(thresholdMagnitudeRange.upperBound, max(thresholdMagnitudeRange.lowerBound, value))
-    }
-
-    public static func clampGracePeriodSeconds(_ value: Int) -> Int {
-        let range = gracePeriodRange
-        return min(range.upperBound, max(range.lowerBound, value))
     }
 }

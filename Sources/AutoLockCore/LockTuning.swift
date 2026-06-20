@@ -17,9 +17,17 @@ public enum LockTuning {
     /// immediately rather than running the countdown again.
     public static let absenceMultiplier: Double = 2.0
 
-    /// Upper bound of the user-configurable grace period (seconds). Single
-    /// source for both the Settings slider clamp and the BLE pruner's fail-safe
-    /// default, so "max grace" lives in exactly one place.
+    /// Advertising-silence tolerance before the away countdown starts, in
+    /// seconds. Previously a user-tunable slider (15–60s); now a fixed product
+    /// constant — 10s balances "don't lock on a brief BLE dropout" against
+    /// "don't leave the Mac open too long after you walk away". The Settings
+    /// plumbing still threads this value through, but the UI no longer exposes
+    /// a control and `Settings.gracePeriodSeconds` always returns this.
+    public static let fixedGracePeriodSeconds: Int = 10
+
+    /// Historical upper bound of the (now removed) user-configurable grace
+    /// period. Retained only as the BLE pruner's fail-safe default for when no
+    /// provider is wired, so it never prunes too soon.
     public static let maxGracePeriodSeconds: Int = 60
 
     /// How often the BLE pruner sweeps for silent devices. Kept here (not as a

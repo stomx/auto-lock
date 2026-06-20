@@ -45,18 +45,11 @@ public final class Settings: ObservableObject {
             defaults.set(clamped, forKey: Keys.thresholdMagnitude)
         }
     }
-    /// Maximum advertising silence we tolerate before starting the countdown.
-    /// Range: 15~60s in 1s steps. Same clamp-before-publish guarantee as above.
-    private var _gracePeriodSeconds: Int
-    public var gracePeriodSeconds: Int {
-        get { _gracePeriodSeconds }
-        set {
-            let clamped = LockSettingBounds.clampGracePeriodSeconds(newValue)
-            objectWillChange.send()
-            _gracePeriodSeconds = clamped
-            defaults.set(clamped, forKey: Keys.gracePeriod)
-        }
-    }
+    /// Advertising-silence tolerance before the away countdown starts. No longer
+    /// user-tunable — fixed at `LockTuning.fixedGracePeriodSeconds` (10s). Kept
+    /// as a property so the rest of the plumbing (ProximityController, the BLE
+    /// pruner) reads it unchanged, but it is read-only and not persisted.
+    public var gracePeriodSeconds: Int { LockTuning.fixedGracePeriodSeconds }
 
     public var rssiThreshold: Int { -thresholdMagnitude }
     public var definitiveAwayThreshold: Int { rssiThreshold - LockTuning.definitiveAwayMarginDBm }
@@ -67,7 +60,6 @@ public final class Settings: ObservableObject {
         static let wakeOnProximity = "wakeOnProximity"
         static let autoUnlock = "autoUnlock"
         static let thresholdMagnitude = "thresholdMagnitude"
-        static let gracePeriod = "gracePeriodSeconds"
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -84,8 +76,6 @@ public final class Settings: ObservableObject {
         let storedMag = defaults.object(forKey: Keys.thresholdMagnitude) as? Int
             ?? LockSettingBounds.defaultThresholdMagnitude
         self._thresholdMagnitude = LockSettingBounds.clampThresholdMagnitude(storedMag)
-        let storedGrace = defaults.object(forKey: Keys.gracePeriod) as? Int ?? 15
-        self._gracePeriodSeconds = LockSettingBounds.clampGracePeriodSeconds(storedGrace)
     }
 
     /// Only one device is supported at a time. Replacing keeps the UI simple

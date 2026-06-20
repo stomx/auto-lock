@@ -24,20 +24,8 @@ import Foundation
         #expect(LockSettingBounds.clampThresholdMagnitude(100) == 100)
     }
 
-    // 신호 끊김 허용: 15~maxGracePeriodSeconds(60).
-    @Test func graceClampsLow() {
-        #expect(LockSettingBounds.clampGracePeriodSeconds(0) == 15)
-    }
-    @Test func graceClampsHigh() {
-        #expect(LockSettingBounds.clampGracePeriodSeconds(120) == LockTuning.maxGracePeriodSeconds)
-    }
-    @Test func gracePassesInRange() {
-        #expect(LockSettingBounds.clampGracePeriodSeconds(30) == 30)
-    }
-    @Test func graceBoundsAreInclusive() {
-        #expect(LockSettingBounds.clampGracePeriodSeconds(15) == 15)
-        #expect(LockSettingBounds.clampGracePeriodSeconds(LockTuning.maxGracePeriodSeconds) == LockTuning.maxGracePeriodSeconds)
-    }
+    // 신호 끊김 허용은 더 이상 사용자 조정 항목이 아니므로(10초 고정) 여기서
+    // 클램프하지 않는다 — LockTuning.fixedGracePeriodSeconds + LockTuningTests 참조.
 
     // 기본 임계값은 README 권장 범위(-75~-85dBm)의 중앙인 -80dBm(magnitude 80).
     // 첫 등록 직후 합리적으로 동작하도록. (과거 100=−100dBm은 거의 안 잠겨 문서와 어긋났다.)
