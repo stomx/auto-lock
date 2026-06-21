@@ -6,53 +6,31 @@
 ## [0.5.0] — 2026-06-21
 
 ### Added
-- **완전 자동 업데이트(자가교체).** 메뉴의 "업데이트" 버튼 한 번으로 새 버전
-  ZIP 다운로드 → SHA256 검증 → 앱 번들 교체 → 재실행까지 자동으로 끝납니다.
-  더 이상 DMG를 열어 수동으로 드래그할 필요가 없습니다.
-  - 분리 실행되는 헬퍼 스크립트가 앱 종료를 기다렸다가 번들을 교체하고
-    quarantine을 제거한 뒤 새 앱을 실행합니다(`SelfUpdatePlan`이 순수 로직으로
-    스크립트를 생성). 다운그레이드 거부·fail-closed 체크섬 검증은 그대로입니다.
-  - 자가교체가 불가능한 위치(App Translocation 상태, 쓰기 불가, ZIP 부재)는
-    `InstallLocation` 판정으로 감지해 기존 DMG 수동 설치로 자동 폴백합니다.
-  - `diagnose self-update [--dry-run|--apply]` 서브커맨드로 파이프라인 E2E 점검.
+- **완전 자동 업데이트(자가교체).** "업데이트" 버튼 한 번으로 ZIP 다운로드 →
+  SHA256 검증 → 번들 교체 → 재실행까지 자동 완료. DMG 수동 드래그가 사라졌습니다.
+  자가교체 불가 위치(App Translocation·쓰기 불가·ZIP 부재)는 기존 DMG 설치로 폴백.
+- `diagnose self-update [--dry-run|--apply]` 서브커맨드.
 
 ### Changed
-- **코드서명을 ad-hoc → 고정 self-signed 인증서로 전환.** ad-hoc 서명은 빌드마다
-  코드 해시가 변해 macOS가 업데이트된 앱을 "다른 앱"으로 인식하고 접근성·블루투스
-  권한을 리셋했습니다. 고정 인증서로 서명하면 designated requirement가 인증서
-  leaf에 묶여, **업데이트 후에도 권한이 유지**됩니다(`release.sh`가 인증서 없으면
-  빌드 중단 + DR 검증 게이트). 인증서 생성은 `scripts/create_signing_cert.sh` 참고.
+- **코드서명을 ad-hoc → 고정 self-signed 인증서로 전환.** ad-hoc은 빌드마다 코드
+  해시가 변해 업데이트 후 블루투스·접근성 권한이 리셋됐습니다. 고정 인증서로
+  designated requirement를 안정화해 **업데이트 후에도 권한이 유지**됩니다.
 
 ### Upgrade notes
-- **v0.4.0 → v0.5.0**: 0.4.0 업데이터는 DMG-mount 방식이라 이번 한 번은 수동
-  드래그 설치가 필요합니다. 또한 ad-hoc → self-signed 전환으로 **블루투스·접근성
-  권한을 1회 다시 허용**해야 합니다. 이후 v0.5.0 → v0.5.1부터는 권한이 유지되며
-  자동 교체됩니다.
+- **v0.4.0 → v0.5.0**: 이번 한 번은 수동 드래그 설치 + 블루투스·접근성 권한 재허용이
+  필요합니다. 이후 버전부터는 권한 유지된 채 자동 교체됩니다.
 
 ## [0.4.0] — 2026-06-20
 
 ### Added
-- **GitHub Releases 기반 자동 업데이트.** 앱 시작 시(및 메뉴 버전 클릭 시) 최신
-  릴리스를 확인하고, 새 버전이 있으면 메뉴에 업데이트 버튼을 노출합니다. 누르면
-  `arm64` DMG를 내려받아 **`SHA256SUMS.txt`와 대조 검증(fail-closed)** 후 디스크
-  이미지를 엽니다. 체크섬 자산 누락·엔트리 누락·불일치·다운로드 실패는 모두
-  업데이트를 중단합니다. ad-hoc 서명 빌드라 앱 자가교체는 하지 않고 "다운로드·
-  검증·열기"까지만 자동화하며, 마지막 드래그 설치는 사용자가 수행합니다.
-  - 결정 로직은 전부 `AutoLockCore` 순수 타입으로 분리: `SemanticVersion`(버전
-    파싱·비교), `ReleaseInfo`/`UpdateCheck`(릴리스 파싱·다운그레이드 거부),
-    `ChecksumVerifier`(fail-closed 검증). 컨트롤러(`UpdateController`)는
-    `@MainActor` 상태머신으로 재진입 가드를 두고, 시스템 경계(GitHub API·
-    URLSession 다운로드·NSWorkspace 열기)는 조립 루트에서 주입합니다.
-  - `diagnose update` 서브커맨드 — 제품 코드 그대로 조회→비교→다운로드→검증을
-    E2E 점검(`--current`로 가능 경로 강제, `--feed`로 픽스처 주입, `--download`/
-    `--open` 단계 선택).
+- **GitHub Releases 기반 자동 업데이트.** 최신 릴리스를 확인해 새 버전이 있으면
+  메뉴에 업데이트 버튼을 노출하고, `arm64` DMG를 내려받아 **`SHA256SUMS.txt`로
+  검증(fail-closed)** 후 엽니다. 마지막 드래그 설치만 수동. 결정 로직은 전부
+  `AutoLockCore` 순수 타입으로 분리.
+- `diagnose update` 서브커맨드.
 
 ### Changed
-- **신호 끊김 허용 시간을 10초로 고정**하고 사용자 조정 슬라이더를 제거했습니다.
-  이전에는 15~60초 범위에서 조정 가능했으나, 고정 상수
-  (`LockTuning.fixedGracePeriodSeconds`)로 단순화했습니다. `Settings`의 grace
-  영속화·클램프 로직이 제거되고, plumbing(컨트롤러·BLE 프루너)은 그대로 이 값을
-  읽습니다.
+- **신호 끊김 허용 시간을 10초로 고정**하고 조정 슬라이더를 제거했습니다(이전 15~60초).
 
 ## [0.3.1] — 2026-06-18
 
