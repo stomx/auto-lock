@@ -27,10 +27,10 @@ import AutoLockCore
         #expect(s.thresholdMagnitude == 40)
     }
 
-    /// 신호 끊김 허용은 더 이상 사용자 조정 항목이 아니라 10초 고정.
-    @Test func graceIsFixedAtTenSeconds() {
+    /// 신호 끊김 허용은 더 이상 사용자 조정 항목이 아니라 15초 고정.
+    @Test func graceIsFixedAtFifteenSeconds() {
         let s = makeSettings()
-        #expect(s.gracePeriodSeconds == 10)
+        #expect(s.gracePeriodSeconds == 15)
         #expect(s.gracePeriodSeconds == LockTuning.fixedGracePeriodSeconds)
     }
 

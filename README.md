@@ -107,7 +107,7 @@ Apple Watch가 없으면 Touch ID/비밀번호로 직접 해제해야 하지만,
    - 즉시잠금 임계값은 자동으로 `임계값 - 10 dBm` (예: 임계값 -80 → 즉시잠금 -90 dBm)
 4. **로그인 시 자동 시작** / **근접 시 화면 깨우기** 토글
 
-> **신호 끊김 허용**은 **10초로 고정**되어 있습니다(설정 항목 아님). 신호가 잠깐
+> **신호 끊김 허용**은 **15초로 고정**되어 있습니다(설정 항목 아님). 신호가 잠깐
 > 끊겼다고 바로 잠그지 않도록 하는 허용 시간으로, 이전 버전의 사용자 조정
 > 슬라이더는 제거되었습니다.
 
@@ -198,8 +198,11 @@ Sources/AutoLockCore/          순수 도메인 (Foundation only, 무부수효�
   MonotonicClock.swift         벽시계 점프에 영향받지 않는 시간원
   CStringSafe.swift            dlerror() 등 NULL-safe C 문자열 변환
   SemanticVersion.swift        버전 파싱·비교 (업데이트 판정용, pure)
-  ReleaseInfo.swift            릴리스 JSON 파싱 + 다운그레이드 거부 + 체크섬 검증
-  SelfUpdatePlan.swift         자가교체 헬퍼 스크립트·인자 생성 (pure)
+  ReleaseInfo.swift            설치 산출물 선택 규칙(select) + 다운그레이드 거부 + 체크섬 검증
+                               — GitHub JSON 형식은 모름(Kit의 파서가 담당)
+  SelfUpdatePlan.swift         자가교체 계획 데이터 + shellQuote 보안 불변식 (pure)
+                               — 셸 스크립트 텍스트는 Kit가 생성
+  DiagnoseArgs.swift           diagnose 공통 인자(--current/--feed) 파싱 (pure)
   TranslocationCheck.swift     설치 위치 판정 (translocated/쓰기불가/교체가능)
   ProximityTypes / Devices / UnlockOutcome  도메인 타입
 
@@ -209,6 +212,8 @@ Sources/AutoLockKit/           컨트롤러 계층 (시스템 부수효과는 �
   Settings.swift               UserDefaults 영속화 (@MainActor)
   ProximityServices.swift      ScreenLocking/DisplayWaking 등 주입 프로토콜
   UpdateController.swift       업데이트 상태 머신 — 자가교체/검증 흐름 배선 (@MainActor)
+  GitHubReleaseParser.swift    GitHub 릴리스 JSON 형식 어댑터 → Core.select 위임
+  SelfUpdateScript.swift       자가교체 /bin/sh 헬퍼 스크립트 생성 (교체 메커니즘)
 
 Sources/AutoLock/              조립 루트 + UI + 시스템 API 어댑터 (executable)
   AutoLockApp.swift            SwiftUI MenuBarExtra entry point

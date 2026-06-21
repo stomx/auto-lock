@@ -14,9 +14,9 @@ import Foundation
         #expect(LockTuning.pruneAfterSeconds(gracePeriodSeconds: 60) == 122.0)
     }
 
-    // 신호 끊김 허용은 더 이상 사용자 조정 항목이 아니라 10초 고정.
-    @Test func fixedGraceIsTenSeconds() {
-        #expect(LockTuning.fixedGracePeriodSeconds == 10)
+    // 신호 끊김 허용은 더 이상 사용자 조정 항목이 아니라 15초 고정.
+    @Test func fixedGraceIsFifteenSeconds() {
+        #expect(LockTuning.fixedGracePeriodSeconds == 15)
     }
 
     // 고정 grace에서도 reachability 불변식이 성립해야 한다(pruner가 absence 이후 evict).

@@ -19,11 +19,11 @@ public enum LockTuning {
 
     /// Advertising-silence tolerance before the away countdown starts, in
     /// seconds. Previously a user-tunable slider (15–60s); now a fixed product
-    /// constant — 10s balances "don't lock on a brief BLE dropout" against
+    /// constant — 15s balances "don't lock on a brief BLE dropout" against
     /// "don't leave the Mac open too long after you walk away". The Settings
     /// plumbing still threads this value through, but the UI no longer exposes
     /// a control and `Settings.gracePeriodSeconds` always returns this.
-    public static let fixedGracePeriodSeconds: Int = 10
+    public static let fixedGracePeriodSeconds: Int = 15
 
     /// Historical upper bound of the (now removed) user-configurable grace
     /// period. Retained only as the BLE pruner's fail-safe default for when no

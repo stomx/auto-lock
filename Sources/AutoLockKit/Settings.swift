@@ -46,7 +46,7 @@ public final class Settings: ObservableObject {
         }
     }
     /// Advertising-silence tolerance before the away countdown starts. No longer
-    /// user-tunable — fixed at `LockTuning.fixedGracePeriodSeconds` (10s). Kept
+    /// user-tunable — fixed at `LockTuning.fixedGracePeriodSeconds` (15s). Kept
     /// as a property so the rest of the plumbing (ProximityController, the BLE
     /// pruner) reads it unchanged, but it is read-only and not persisted.
     public var gracePeriodSeconds: Int { LockTuning.fixedGracePeriodSeconds }
