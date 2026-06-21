@@ -54,9 +54,13 @@ security set-key-partition-list -S apple-tool:,apple:,codesign: \
 4. 생성 후 **login** 키체인에 저장(개인키 포함).
 5. 확인:
    ```bash
-   security find-identity -v -p codesigning
+   security find-identity -p codesigning
    ```
    목록에 `AutoLock Self-Signed`가 보이면 성공.
+
+   > `-v`(valid-only)는 쓰지 마세요. self-signed 인증서는 신뢰 체인이 없어
+   > `CSSMERR_TP_NOT_TRUSTED`로 표시되며 `-v`에는 **0개로 나옵니다**. 코드서명
+   > 자체는 정상 동작하므로 `-v` 없이 확인해야 합니다(release.sh도 `-v` 없이 검사).
 
 ## 빌드 시 사용
 

@@ -3,7 +3,7 @@
 이 프로젝트의 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를
 따르고, 버전 번호는 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
-## [0.5.0] — 2026-06-20
+## [0.5.0] — 2026-06-21
 
 ### Added
 - **완전 자동 업데이트(자가교체).** 메뉴의 "업데이트" 버튼 한 번으로 새 버전

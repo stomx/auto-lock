@@ -90,9 +90,10 @@ Apple Watch가 없으면 Touch ID/비밀번호로 직접 해제해야 하지만,
 - 암호는 Keychain의 무프롬프트 ACL로 저장됩니다 — 같은 사용자 세션의 다른 앱이
   이론상 읽을 수 있습니다. 자동 해제 용도로 합리적인 트레이드오프이며,
   토글을 끄거나 "삭제"를 누르면 즉시 제거됩니다.
-- ad-hoc 서명 빌드는 cdhash가 매번 바뀌어 첫 자동 해제 시도에서 한 번 Keychain
-  접근 다이얼로그가 뜰 수 있습니다. 한 번 "항상 허용"으로 처리해 두면 같은 빌드
-  내에서는 다시 묻지 않습니다.
+- 첫 자동 해제 시도에서 한 번 Keychain 접근 다이얼로그가 뜰 수 있습니다. "항상
+  허용"으로 처리해 두면 다시 묻지 않습니다. (v0.5.0부터 고정 self-signed 서명이라
+  업데이트로 버전이 바뀌어도 이 허용이 유지됩니다 — 이전 ad-hoc 빌드는 cdhash가
+  매번 바뀌어 업데이트마다 다시 물었습니다.)
 
 ### 설정
 
@@ -101,8 +102,8 @@ Apple Watch가 없으면 Touch ID/비밀번호로 직접 해제해야 하지만,
 1. 우상단 토글로 활성화
 2. **+ ADD** (또는 **REPLACE**) 버튼 → 별도 윈도우의 라이브 스캔 목록에서 디바이스 선택
    (가까이 두면 RSSI 높은 순으로 정렬됨). 이미 등록된 디바이스가 있으면 새 선택이 기존 항목을 대체합니다.
-3. **거리 임계값** 슬라이더 — 40 ~ 100 dBm, 10 단위 조정
-   - 기본값은 **-80 dBm** (권장 범위 -75 ~ -85 dBm의 중앙). 거리에 따라 직접 측정해보고 조정
+3. **거리 임계값** 슬라이더 — −40 ~ −100 dBm, 10 단위 조정
+   - 기본값은 **−80 dBm** (권장 범위 −75 ~ −85 dBm의 중앙). 거리에 따라 직접 측정해보고 조정
    - 즉시잠금 임계값은 자동으로 `임계값 - 10 dBm` (예: 임계값 -80 → 즉시잠금 -90 dBm)
 4. **로그인 시 자동 시작** / **근접 시 화면 깨우기** 토글
 
@@ -196,6 +197,10 @@ Sources/AutoLockCore/          순수 도메인 (Foundation only, 무부수효�
   LockTuning.swift             도메인 튜닝 상수 단일 출처
   MonotonicClock.swift         벽시계 점프에 영향받지 않는 시간원
   CStringSafe.swift            dlerror() 등 NULL-safe C 문자열 변환
+  SemanticVersion.swift        버전 파싱·비교 (업데이트 판정용, pure)
+  ReleaseInfo.swift            릴리스 JSON 파싱 + 다운그레이드 거부 + 체크섬 검증
+  SelfUpdatePlan.swift         자가교체 헬퍼 스크립트·인자 생성 (pure)
+  TranslocationCheck.swift     설치 위치 판정 (translocated/쓰기불가/교체가능)
   ProximityTypes / Devices / UnlockOutcome  도메인 타입
 
 Sources/AutoLockKit/           컨트롤러 계층 (시스템 부수효과는 프로토콜 주입)
@@ -203,11 +208,13 @@ Sources/AutoLockKit/           컨트롤러 계층 (시스템 부수효과는 �
   BLEScanner.swift             CoreBluetooth 스캐너 + RSSI 평활화 (@MainActor)
   Settings.swift               UserDefaults 영속화 (@MainActor)
   ProximityServices.swift      ScreenLocking/DisplayWaking 등 주입 프로토콜
+  UpdateController.swift       업데이트 상태 머신 — 자가교체/검증 흐름 배선 (@MainActor)
 
 Sources/AutoLock/              조립 루트 + UI + 시스템 API 어댑터 (executable)
   AutoLockApp.swift            SwiftUI MenuBarExtra entry point
   main.swift                   진입점 (GUI vs diagnose 분기)
   ProximityServiceAdapters.swift  시스템 구현 → Kit 프로토콜 어댑터
+  UpdateAdapters.swift         GitHub 클라이언트·다운로드·검증·자가교체 설치 어댑터
   MenuView.swift               메뉴바 UI
   DesignSystem.swift           공용 디자인 토큰 + 재사용 뷰
   DevicePickerView.swift       디바이스 선택 화면
