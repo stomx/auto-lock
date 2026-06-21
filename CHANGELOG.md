@@ -3,6 +3,16 @@
 이 프로젝트의 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를
 따르고, 버전 번호는 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.5.1] — 2026-06-22
+
+### Changed
+- **신호 끊김 허용 기본값을 10초 → 15초로 조정.** 짧은 BLE 끊김에 더 관대해져
+  순간적인 신호 누락으로 잠기는 경우를 줄입니다.
+- **업데이트 파이프라인·BLE 상태 경계를 정리(내부 리팩토링, 동작 보존).** 릴리스
+  형식 파싱(GitHub JSON·SHA256SUMS)과 자가교체 셸 스크립트 생성을 `AutoLockKit`
+  어댑터로, 순수 선택·검증 규칙을 `AutoLockCore`로 분리. CoreBluetooth 의존을
+  스캐너 한 곳으로 격리. 테스트 148 → 181건.
+
 ## [0.5.0] — 2026-06-21
 
 ### Added
