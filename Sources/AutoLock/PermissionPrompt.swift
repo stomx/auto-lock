@@ -1,5 +1,5 @@
 import AppKit
-import CoreBluetooth
+import AutoLockCore
 
 /// Shows a one-time guidance alert when Bluetooth permission is missing.
 /// macOS does not allow apps to grant their own TCC permissions, so the best
@@ -7,7 +7,7 @@ import CoreBluetooth
 /// the relevant Settings pane.
 @MainActor
 enum PermissionPrompt {
-    static func presentIfNeeded(state: CBManagerState) {
+    static func presentIfNeeded(state: BluetoothPowerState) {
         switch state {
         case .unauthorized:
             showAlert(

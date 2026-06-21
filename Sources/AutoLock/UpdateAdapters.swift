@@ -47,7 +47,7 @@ struct GitHubUpdateClient: UpdateChecking {
             let code = (response as? HTTPURLResponse)?.statusCode ?? -1
             throw UpdateError.network("HTTP \(code)")
         }
-        guard let release = ReleaseInfo.parse(data) else {
+        guard let release = GitHubReleaseParser.parse(data) else {
             throw UpdateError.noRelease
         }
         return release
@@ -128,7 +128,10 @@ enum UpdateDownload {
         }
         let actual = SHA256.hash(data: fileData).map { String(format: "%02x", $0) }.joined()
 
-        switch ChecksumVerifier.verify(sums: sums, fileName: fileName, actual: actual) {
+        // Parse the SHA256SUMS text (Kit format adapter), then apply the pure
+        // fail-closed policy (Core).
+        let expected = Sha256SumsParser.expectedSHA256(in: sums, for: fileName)
+        switch ChecksumVerifier.verify(expected: expected, actual: actual) {
         case .verified:
             return
         case .mismatch, .entryMissing:
@@ -209,7 +212,7 @@ struct SelfUpdateInstaller: SelfReplacing {
             targetAppPath: bundleURL.path
         )
         let scriptURL = stagingDir.appendingPathComponent("self-update.sh")
-        try plan.scriptText.write(to: scriptURL, atomically: true, encoding: .utf8)
+        try SelfUpdateScript.text(for: plan).write(to: scriptURL, atomically: true, encoding: .utf8)
 
         if dryRun {
             // diagnose --dry-run: leave staging + script for inspection, return.

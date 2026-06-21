@@ -2,8 +2,9 @@ import Testing
 import Foundation
 @testable import AutoLockCore
 
-/// `SelfUpdatePlan` builds the detached swap script + argument vector. Pure —
-/// no process is spawned here; we only assert the generated text/args.
+/// `SelfUpdatePlan` is the pure swap-plan data. Its only behavior is the
+/// positional argument vector ($1..$3) the helper reads; the script *text* that
+/// consumes those args lives in `AutoLockKit.SelfUpdateScript`, tested there.
 @Suite struct SelfUpdatePlanTests {
 
     private func plan(
@@ -15,6 +16,7 @@ import Foundation
     }
 
     // 인자 벡터는 [pid, staging, target] 순서로 정확히 전달된다.
+    // (스크립트의 $1=pid $2=staging $3=target 계약과 일치 — SelfUpdateScriptTests가 교차고정)
     @Test func argumentsAreInOrder() {
         let p = plan()
         #expect(p.arguments == [
@@ -22,29 +24,5 @@ import Foundation
             "/Applications/.AutoLockUpdate-v1.2.3/AutoLock.app",
             "/Applications/AutoLock.app",
         ])
-    }
-
-    // 스크립트는 sh shebang으로 시작하고 핵심 단계를 모두 포함한다.
-    @Test func scriptHasAllSteps() {
-        let s = plan().scriptText
-        #expect(s.hasPrefix("#!/bin/sh"))
-        #expect(s.contains("kill -0"))                       // 부모 종료 대기
-        #expect(s.contains("/usr/bin/ditto"))                // 번들 교체
-        #expect(s.contains("xattr -dr com.apple.quarantine"))// Gatekeeper 재경고 방지
-        #expect(s.contains("/usr/bin/open"))                 // 재실행
-    }
-
-    // 스크립트는 경로를 "$VAR"로 인용해 공백/특수문자 경로에도 안전하다.
-    @Test func scriptQuotesExpansions() {
-        let s = plan().scriptText
-        #expect(s.contains("\"$TARGET\""))
-        #expect(s.contains("\"$STAGING\""))
-        #expect(s.contains("\"$PARENT\""))
-    }
-
-    // shellQuote는 작은따옴표를 '\'' 시퀀스로 이스케이프해 탈출을 막는다.
-    @Test func shellQuoteEscapesSingleQuote() {
-        #expect(SelfUpdatePlan.shellQuote("/Users/a b/App.app") == "'/Users/a b/App.app'")
-        #expect(SelfUpdatePlan.shellQuote("it's") == "'it'\\''s'")
     }
 }

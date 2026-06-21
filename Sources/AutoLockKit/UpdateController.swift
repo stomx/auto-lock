@@ -71,15 +71,17 @@ public enum UpdateState: Equatable {
 
 // MARK: - Controller
 
-/// Orchestrates the "check → offer → download → open DMG" update flow. All the
-/// decision logic (version compare, release parse, checksum) lives in pure
-/// `AutoLockCore` types; this controller only sequences the injected system
-/// boundaries and publishes state for the menu UI.
+/// Orchestrates the "check → offer → download → install (or fall back to DMG)"
+/// update flow. All the decision logic (version compare, release parse,
+/// checksum) lives in pure `AutoLockCore` types; this controller only sequences
+/// the injected system boundaries and publishes state for the menu UI.
 ///
-/// Deliberately stops at *opening* the DMG rather than replacing the running
-/// app: the ad-hoc-signed build can't self-replace without re-triggering
-/// Gatekeeper, so handing the user a mounted DMG is the honest, frictionless
-/// endpoint. See README for why full Sparkle-style auto-install isn't used.
+/// The primary path is an in-place self-replace (`downloadAndInstall`): the
+/// self-signed build keeps a stable certificate leaf across updates, so the
+/// swapped bundle retains its TCC permissions. The mounted-DMG path
+/// (`downloadAndOpen`) is the manual fallback used only when the app can't
+/// replace itself here — translocated (read-only Gatekeeper copy), the bundle
+/// isn't writable, the release ships no ZIP, or no self-updater was wired.
 @MainActor
 public final class UpdateController: ObservableObject {
     @Published public private(set) var state: UpdateState = .idle

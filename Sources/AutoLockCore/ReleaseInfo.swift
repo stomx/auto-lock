@@ -1,7 +1,29 @@
 import Foundation
 
-/// The subset of a GitHub `releases/latest` payload the updater needs. Pure
-/// value type; `parse` decodes raw JSON `Data` with no network access.
+/// A downloadable artifact attached to a release, already decoded from whatever
+/// wire format the host (GitHub, a staging fork, a local fixture) speaks. The
+/// format adapter that produced it — `GitHubReleaseParser` in `AutoLockKit` —
+/// owns the JSON-key knowledge; this type is format-neutral so the domain
+/// `select` rule below never sees a `tag_name` or `browser_download_url`.
+public struct RemoteReleaseAsset: Equatable, Sendable {
+    public let name: String          // e.g. "AutoLock-0.3.2-arm64.dmg"
+    /// Optional so an asset whose URL the adapter couldn't parse still
+    /// participates in name-based selection. `select` chooses by name first,
+    /// then checks the URL — so a broken URL on the *chosen* dmg rejects the
+    /// whole release (fail-closed) rather than silently falling back to a
+    /// different artifact.
+    public let downloadURL: URL?
+
+    public init(name: String, downloadURL: URL?) {
+        self.name = name
+        self.downloadURL = downloadURL
+    }
+}
+
+/// The subset of a release the updater needs, plus the pure domain rule that
+/// chooses which artifacts to install. Value type — `select` operates on
+/// already-decoded `RemoteReleaseAsset`s, so no wire-format or network
+/// knowledge lives here.
 public struct ReleaseInfo: Equatable, Sendable {
     public let tag: String                 // e.g. "v0.3.2"
     public let version: SemanticVersion    // parsed from tag
@@ -33,51 +55,47 @@ public struct ReleaseInfo: Equatable, Sendable {
         self.zipFileName = zipFileName
     }
 
-    /// Decode a `releases/latest` JSON body. Returns nil when the tag isn't a
-    /// parseable version or there is no `.dmg` asset (nothing installable).
-    public static func parse(_ data: Data) -> ReleaseInfo? {
-        struct Payload: Decodable {
-            let tag_name: String
-            let assets: [Asset]
-            struct Asset: Decodable {
-                let name: String
-                let browser_download_url: String
-            }
-        }
+    /// Domain rule: given a release tag and its already-decoded assets, choose
+    /// the installable artifacts. Returns nil when the tag isn't a parseable
+    /// version or there's no `.dmg` asset (nothing installable). Pure — the
+    /// caller (a format adapter such as `GitHubReleaseParser`) has already
+    /// turned the wire payload into `RemoteReleaseAsset`s, so no JSON-key or
+    /// network knowledge lives here.
+    public static func select(tag: String, assets: [RemoteReleaseAsset]) -> ReleaseInfo? {
+        guard let version = SemanticVersion(tag) else { return nil }
 
-        guard let payload = try? JSONDecoder().decode(Payload.self, from: data),
-              let version = SemanticVersion(payload.tag_name) else {
-            return nil
-        }
+        // Select by NAME first, then read the chosen asset's URL — same order as
+        // the original parser, so a broken URL on the chosen dmg rejects the
+        // whole release (fail-closed) instead of falling back to another dmg.
 
         // Prefer the arm64 dmg (this app is Apple Silicon only); fall back to
-        // any .dmg if no arch-tagged one is present. Require a dmg to consider
-        // the release installable.
-        let dmgs = payload.assets.filter { $0.name.hasSuffix(".dmg") }
+        // any .dmg if no arch-tagged one is present. A dmg with an unusable URL
+        // makes the release non-installable.
+        let dmgs = assets.filter { $0.name.hasSuffix(".dmg") }
         guard let dmg = dmgs.first(where: { $0.name.contains("arm64") }) ?? dmgs.first,
-              let dmgURL = URL(string: dmg.browser_download_url) else {
+              let dmgURL = dmg.downloadURL else {
             return nil
         }
 
         // The arm64 zip, if any (same arch-preference as the dmg). Optional —
-        // its absence just means the self-updater can't run and we fall back to
-        // the dmg manual-install path.
-        let zips = payload.assets.filter { $0.name.hasSuffix(".zip") }
-        let zip = zips.first(where: { $0.name.contains("arm64") }) ?? zips.first
-        let zipURL = zip.flatMap { URL(string: $0.browser_download_url) }
+        // its absence (or an unusable URL) just means the self-updater can't run
+        // and we fall back to the dmg manual-install path. We only keep the zip
+        // when its URL is usable, so `zipURL` and `zipFileName` stay consistent:
+        // never a name without a URL (which would look installable but isn't).
+        let zips = assets.filter { $0.name.hasSuffix(".zip") }
+        let usableZip = (zips.first(where: { $0.name.contains("arm64") }) ?? zips.first)
+            .flatMap { z in z.downloadURL.map { (name: z.name, url: $0) } }
 
-        let checksums = payload.assets
-            .first(where: { $0.name == "SHA256SUMS.txt" })
-            .flatMap { URL(string: $0.browser_download_url) }
+        let checksums = assets.first(where: { $0.name == "SHA256SUMS.txt" })
 
         return ReleaseInfo(
-            tag: payload.tag_name,
+            tag: tag,
             version: version,
             dmgURL: dmgURL,
             dmgFileName: dmg.name,
-            checksumsURL: checksums,
-            zipURL: zipURL,
-            zipFileName: zip?.name
+            checksumsURL: checksums?.downloadURL,
+            zipURL: usableZip?.url,
+            zipFileName: usableZip?.name
         )
     }
 }
@@ -97,21 +115,11 @@ public enum UpdateCheck {
     }
 }
 
-/// Reads `SHA256SUMS.txt` (`<hex>  <filename>` per line) and compares hashes.
+/// Checksum verification *policy* — fail-closed, case-insensitive. Operates on
+/// an already-extracted expected hash (`expected == nil` means the file had no
+/// entry), so the `SHA256SUMS.txt` *text format* (a shasum wire format) is
+/// parsed by an adapter in `AutoLockKit`, not here. Pure domain rule.
 public enum ChecksumVerifier {
-    /// The expected lowercase-or-uppercase hex for `fileName`, or nil if absent.
-    public static func expectedSHA256(in sums: String, for fileName: String) -> String? {
-        for line in sums.split(whereSeparator: \.isNewline) {
-            // shasum format: "<hex>  <filename>" (two spaces, but split on any run).
-            let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
-            guard parts.count >= 2 else { continue }
-            if String(parts[1]) == fileName {
-                return String(parts[0])
-            }
-        }
-        return nil
-    }
-
     /// Case-insensitive hex comparison.
     public static func matches(expected: String, actual: String) -> Bool {
         expected.lowercased() == actual.lowercased()
@@ -124,14 +132,12 @@ public enum ChecksumVerifier {
     }
 
     /// Fail-closed verification: only `.verified` permits proceeding. A missing
-    /// entry is a failure, not a pass — every official release ships a complete
-    /// `SHA256SUMS.txt` (see release.sh), so a missing line means a broken or
-    /// tampered release, which an ad-hoc build (no OS-level publisher trust)
-    /// must not install silently.
-    public static func verify(sums: String, fileName: String, actual: String) -> Result {
-        guard let expected = expectedSHA256(in: sums, for: fileName) else {
-            return .entryMissing
-        }
+    /// entry (`expected == nil`) is a failure, not a pass — every official
+    /// release ships a complete `SHA256SUMS.txt` (see release.sh), so a missing
+    /// line means a broken or tampered release, which a self-signed build (no
+    /// OS-level publisher trust) must not install silently.
+    public static func verify(expected: String?, actual: String) -> Result {
+        guard let expected else { return .entryMissing }
         return matches(expected: expected, actual: actual) ? .verified : .mismatch
     }
 }

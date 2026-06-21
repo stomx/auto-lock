@@ -1,6 +1,5 @@
 import Foundation
 import AppKit
-import CoreBluetooth
 import AutoLockKit
 import AutoLockCore
 
@@ -227,26 +226,20 @@ enum Diagnostics {
     private static func runUpdate(_ args: [String]) {
         let doDownload = args.contains("--download") || args.contains("--open")
         let doOpen = args.contains("--open")
-        // --current <ver> 파싱 (업데이트 "가능" 경로를 강제하기 위해 현재 버전 가장)
-        var currentRaw = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
-        if let i = args.firstIndex(of: "--current"), i + 1 < args.count {
-            currentRaw = args[i + 1]
-        }
-        guard let current = SemanticVersion(currentRaw) else {
-            print("❌ --current 버전 파싱 실패: \(currentRaw)")
+        // --current / --feed 파싱은 self-update와 공유하는 순수 로직이라
+        // AutoLockCore.DiagnoseArgs로 추출돼 단위 테스트된다.
+        let defaultCurrent = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        let common: DiagnoseArgs.CommonOptions
+        switch DiagnoseArgs.parseCommon(args, defaultCurrent: defaultCurrent) {
+        case .ok(let opts): common = opts
+        case .failure(let message):
+            print(message)
             exit(2)
         }
-        // --feed <url> 로 릴리스 피드 출처를 바꾼다(로컬 픽스처/스테이징 테스트용).
-        var feedURL: URL? = nil
-        if let i = args.firstIndex(of: "--feed"), i + 1 < args.count {
-            guard let u = URL(string: args[i + 1]) else {
-                print("❌ --feed URL 파싱 실패: \(args[i + 1])")
-                exit(2)
-            }
-            feedURL = u
-        }
+        let current = common.currentVersion
+        let feedURL = common.feedURL
 
-        print("🔎 업데이트 점검 — 현재 버전 가정: v\(currentRaw)")
+        print("🔎 업데이트 점검 — 현재 버전 가정: v\(common.currentRaw)")
         print("   피드: \(feedURL?.absoluteString ?? "github.com/stomx/auto-lock (releases/latest)")\n")
 
         // --open 이 아니면 실제 mount 부작용을 피하려고 열기를 가로채는 더미 opener.
@@ -317,22 +310,17 @@ enum Diagnostics {
         let apply = args.contains("--apply")
         let dryRun = !apply   // 기본 dry-run
 
-        var currentRaw = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
-        if let i = args.firstIndex(of: "--current"), i + 1 < args.count {
-            currentRaw = args[i + 1]
-        }
-        guard let current = SemanticVersion(currentRaw) else {
-            print("❌ --current 버전 파싱 실패: \(currentRaw)")
+        // runUpdate와 공유하는 --current / --feed 파싱(AutoLockCore.DiagnoseArgs).
+        let defaultCurrent = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+        let common: DiagnoseArgs.CommonOptions
+        switch DiagnoseArgs.parseCommon(args, defaultCurrent: defaultCurrent) {
+        case .ok(let opts): common = opts
+        case .failure(let message):
+            print(message)
             exit(2)
         }
-        var feedURL: URL? = nil
-        if let i = args.firstIndex(of: "--feed"), i + 1 < args.count {
-            guard let u = URL(string: args[i + 1]) else {
-                print("❌ --feed URL 파싱 실패: \(args[i + 1])")
-                exit(2)
-            }
-            feedURL = u
-        }
+        let current = common.currentVersion
+        let feedURL = common.feedURL
 
         // dry-run은 실제 앱 번들 대신 임시 타깃을 둬서 staging이 temp로 가게 한다.
         let targetBundle: URL = dryRun
@@ -343,7 +331,7 @@ enum Diagnostics {
             try? FileManager.default.createDirectory(at: targetBundle, withIntermediateDirectories: true)
         }
 
-        print("🔎 자가교체 점검 (\(apply ? "⚠️ APPLY — 실제 교체" : "dry-run")) — 현재 버전 가정: v\(currentRaw)")
+        print("🔎 자가교체 점검 (\(apply ? "⚠️ APPLY — 실제 교체" : "dry-run")) — 현재 버전 가정: v\(common.currentRaw)")
         print("   피드: \(feedURL?.absoluteString ?? "github.com/stomx/auto-lock (releases/latest)")")
         print("   타깃 번들: \(targetBundle.path)\n")
 
@@ -416,7 +404,7 @@ enum Diagnostics {
 
     // MARK: - 헬퍼
 
-    private static func stateDescription(_ state: CBManagerState) -> String {
+    private static func stateDescription(_ state: BluetoothPowerState) -> String {
         switch state {
         case .unknown: return "unknown(미확정)"
         case .resetting: return "resetting(재설정중)"
@@ -424,7 +412,6 @@ enum Diagnostics {
         case .unauthorized: return "unauthorized(권한없음)"
         case .poweredOff: return "poweredOff(꺼짐)"
         case .poweredOn: return "poweredOn(켜짐)"
-        @unknown default: return "알수없음(\(state.rawValue))"
         }
     }
 }

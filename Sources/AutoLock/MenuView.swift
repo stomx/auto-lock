@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import CoreBluetooth
 import AutoLockCore
 import AutoLockKit
 
@@ -236,7 +235,7 @@ struct MenuView: View {
                     step: 10,
                     accent: Palette.lime
                 )
-                // 신호 끊김 허용은 10초 고정(LockTuning.fixedGracePeriodSeconds)이라
+                // 신호 끊김 허용은 15초 고정(LockTuning.fixedGracePeriodSeconds)이라
                 // 더 이상 조정 슬라이더를 노출하지 않는다.
             }
         }
@@ -565,7 +564,6 @@ struct MenuView: View {
         case .unsupported: return "미지원"
         case .resetting: return "재설정 중"
         case .unknown: return "초기화 중"
-        @unknown default: return "알 수 없음"
         }
     }
 

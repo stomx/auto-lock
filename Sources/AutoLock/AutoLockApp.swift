@@ -1,6 +1,5 @@
 import SwiftUI
 import Combine
-import CoreBluetooth
 import AutoLockKit
 import AutoLockCore
 
@@ -69,7 +68,7 @@ final class PermissionObserver: ObservableObject {
             .combineLatest(scanner.$bluetoothState)
             .sink { [weak self] resolved, state in
                 guard let self, resolved, !self.permissionPromptShown else { return }
-                if state == .unauthorized || state == .poweredOff || state == .unsupported {
+                if state.needsUserAction {
                     self.permissionPromptShown = true
                     PermissionPrompt.presentIfNeeded(state: state)
                 }

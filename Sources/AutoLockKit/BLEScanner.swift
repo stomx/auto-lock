@@ -6,7 +6,10 @@ import AutoLockCore
 @MainActor
 public final class BLEScanner: NSObject, ObservableObject, ProximityScanning {
     @Published public private(set) var devices: [UUID: DiscoveredDevice] = [:]
-    @Published public private(set) var bluetoothState: CBManagerState = .unknown
+    /// The adapter state as a pure domain enum — the CoreBluetooth
+    /// `CBManagerState` is mapped here and never crosses this boundary, so UI /
+    /// diagnostics / permission code depend on `AutoLockCore`, not CoreBluetooth.
+    @Published public private(set) var bluetoothState: BluetoothPowerState = .unknown
     @Published public private(set) var isScanning: Bool = false
     /// True once we've called `centralManagerDidUpdateState` at least once. Until
     /// then `bluetoothState == .unknown` because CoreBluetooth hasn't reported in.
@@ -97,7 +100,9 @@ public final class BLEScanner: NSObject, ObservableObject, ProximityScanning {
 // itself is not actor-annotated). Each method then runs in main-actor context.
 extension BLEScanner: @preconcurrency CBCentralManagerDelegate {
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        bluetoothState = central.state
+        // Map the CoreBluetooth framework state to the domain enum at this
+        // boundary so the published value carries no CoreBluetooth type.
+        bluetoothState = BluetoothPowerState(rawState: central.state.rawValue)
         stateResolved = true
         // Only auto-resume if scanning was actually requested. Without this
         // gate a toggled-off AutoLock would silently restart scanning the
