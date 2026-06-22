@@ -1,0 +1,7 @@
+# 의존성·빌드 산출물 — Cloudflare Pages가 빌드 시 생성하므로 커밋하지 않는다.
+node_modules/
+dist/
+
+# 로그·OS
+*.log
+.DS_Store

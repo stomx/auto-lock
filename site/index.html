@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="/images/icon.svg" />
+  <title>AutoLock — 자리를 비우면 Mac이 알아서 잠깁니다</title>
+  <meta name="description" content="폰·워치의 블루투스(BLE) 신호로 거리를 읽어 macOS 화면을 자동으로 잠그는 메뉴바 앱. 다시 다가오면 깨어나고, 자동 잠금 해제도 지원. 오픈소스, 로컬에서만 동작." />
+  <meta name="theme-color" content="#0a1109" />
+  <link rel="canonical" href="https://auto-lock.stomx.net/" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="AutoLock" />
+  <meta property="og:locale" content="ko_KR" />
+  <meta property="og:url" content="https://auto-lock.stomx.net/" />
+  <meta property="og:title" content="AutoLock — 자리를 비우면 Mac이 알아서 잠깁니다" />
+  <meta property="og:description" content="폰·워치의 블루투스 신호로 거리를 읽어 macOS 화면을 자동으로 잠그는 메뉴바 앱. 다시 다가오면 깨어납니다." />
+  <meta property="og:image" content="https://auto-lock.stomx.net/og-image.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="AutoLock — macOS 자동 잠금 메뉴바 앱" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="AutoLock — 자리를 비우면 Mac이 알아서 잠깁니다" />
+  <meta name="twitter:description" content="폰·워치의 블루투스 신호로 거리를 읽어 macOS 화면을 자동으로 잠그는 메뉴바 앱." />
+  <meta name="twitter:image" content="https://auto-lock.stomx.net/og-image.png" />
+  <meta name="twitter:image:alt" content="AutoLock — macOS 자동 잠금 메뉴바 앱" />
+
+  <!-- 구조화 데이터: SoftwareApplication -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "AutoLock",
+    "description": "폰·워치의 블루투스 신호로 거리를 읽어 macOS 화면을 자동으로 잠그는 메뉴바 앱.",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "macOS 13+",
+    "url": "https://auto-lock.stomx.net/",
+    "downloadUrl": "https://github.com/stomx/auto-lock/releases/latest",
+    "softwareVersion": "0.5.1",
+    "image": "https://auto-lock.stomx.net/og-image.png",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "license": "https://github.com/stomx/auto-lock/blob/main/LICENSE",
+    "author": { "@type": "Person", "name": "Jaymon" }
+  }
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+  <!-- FOUC 방지: React 마운트 전에 저장된 테마(system/dark/light)를 먼저 적용 -->
+  <script>
+    (function () {
+      try {
+        var pref = localStorage.getItem('autolock.theme');
+        var isLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+        var theme = (pref === 'dark' || pref === 'light') ? pref : (isLight ? 'light' : 'dark');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {}
+    })();
+  </script>
+  <script type="module" src="/src/main.jsx"></script>
+</body>
+</html>
