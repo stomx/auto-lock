@@ -16,10 +16,10 @@ export const HERO = {
 }
 
 // asset() 으로 base 경로를 붙여 dev/배포 모두에서 동작하게 한다.
+// settings.png는 menubar-popover에 설정 영역이 그대로 포함돼 중복이라 제외.
 export const SCREENSHOTS = [
-  { src: 'images/menubar-popover.png', caption: '메뉴바 팝오버 — 근접 상태·신호 강도' },
+  { src: 'images/menubar-popover.png', caption: '메뉴바 팝오버 — 근접 상태·신호 강도·설정' },
   { src: 'images/device-picker.png', caption: '디바이스 선택 — 신호 강도순 라이브' },
-  { src: 'images/settings.png', caption: '설정 — 토글과 거리 임계값' },
 ]
 
 // icon 값은 components/Icons.jsx 의 ICONS 키.
