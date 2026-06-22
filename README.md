@@ -10,6 +10,23 @@
 > 일부 환경(특히 최신 보안 설정)에서는 자동 입력이 무시됩니다. 그 경우 **Apple Watch
 > Auto Unlock** 또는 Touch ID로 인증해야 합니다.
 
+<table align="center">
+  <tr>
+    <td align="center" width="33%">
+      <img src="docs/images/menubar-popover.png" alt="메뉴바 팝오버 — 근접 상태·신호 강도·등록 디바이스" /><br/>
+      <sub>메뉴바 팝오버</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/images/device-picker.png" alt="디바이스 선택 — 주변 BLE 기기를 신호 강도순으로 라이브 표시" /><br/>
+      <sub>디바이스 선택</sub>
+    </td>
+    <td align="center" width="33%">
+      <img src="docs/images/settings.png" alt="설정 — 토글과 거리 임계값" /><br/>
+      <sub>설정</sub>
+    </td>
+  </tr>
+</table>
+
 ## 동작 방식
 
 1. CoreBluetooth로 주변 BLE 신호를 스캔
@@ -28,6 +45,10 @@
 - 카운트다운이 시작되어도 화면 오버레이는 마지막 5초가 남았을 때만 등장합니다 (5 → 4 → 3 → 2 → 1).
 - 메뉴바의 상태 텍스트에는 전체 남은 시간이 표시됩니다.
 - 카운트다운 도중 신호가 회복되면 즉시 초기화되며, 다음 이탈 시 처음부터 다시 카운트.
+
+<p align="center">
+  <img src="docs/images/countdown-overlay.png" width="220" alt="화면 중앙에 표시되는 카운트다운 오버레이" />
+</p>
 
 ## 빠른 시작
 
@@ -83,6 +104,10 @@ Apple Watch가 없으면 Touch ID/비밀번호로 직접 해제해야 하지만,
 2. 둘 다 초록 체크가 뜨면 준비 완료.
 3. 잠긴 후 디바이스가 충분히 가까워지면 (잠금 임계값 + 20 dBm) 화면이 깨고
    암호가 자동 입력되어 풀립니다.
+
+<p align="center">
+  <img src="docs/images/password-sheet.png" width="380" alt="로그인 암호 저장 화면 — macOS Keychain에 저장, 외부 전송 없음" />
+</p>
 
 **한계와 보안 메모**
 - macOS 잠금 화면이 외부 키 이벤트를 차단하는 환경(보안 정책에 따라 다름)에서는
@@ -178,70 +203,15 @@ self-signed 서명(Apple 공증 없음)이라 동료가 첫 실행 시 Gatekeepe
 
 ## 구조
 
-3계층으로 분리되어 있습니다. 도메인 로직(`AutoLockCore`)은 Foundation만 의존하는
-순수 코드라 CoreBluetooth/AppKit 없이 단위 테스트되고, 시스템 부수효과는
-프로토콜로 주입됩니다.
+3계층 — 의존성은 안쪽(순수 도메인)으로만 흐릅니다.
 
-```
-Sources/AutoLockCore/          순수 도메인 (Foundation only, 무부수효과 → 테스트 가능)
-  ProximityEvaluator.swift     단일 임계값 + 신호 끊김 허용시간 결정 함수 (pure)
-  WakeDecision.swift           화면 깨우기/자동해제 게이팅 (pure)
-  BestDeviceSelector.swift     추적 기기 중 최강 신호 선택
-  RssiSmoother.swift           per-device EWMA 평활화 + prune
-  DeviceNameResolver.swift     광고 이름 해석 (Unknown/빈값 처리)
-  ScanPolicy.swift             스캔 가부 정책 (requested × poweredOn)
-  UnlockPreflight.swift        자동해제 동기 선검증 (password/AX/eventSource)
-  UnlockFollowup.swift         자동해제 결과 후속 행동 (fallback wake 여부)
-  KeychainACLPolicy.swift      Keychain ACL 빌드 판정
-  LockSettingBounds.swift      설정값 범위·기본값 단일 출처
-  LockTuning.swift             도메인 튜닝 상수 단일 출처
-  MonotonicClock.swift         벽시계 점프에 영향받지 않는 시간원
-  CStringSafe.swift            dlerror() 등 NULL-safe C 문자열 변환
-  SemanticVersion.swift        버전 파싱·비교 (업데이트 판정용, pure)
-  ReleaseInfo.swift            설치 산출물 선택 규칙(select) + 다운그레이드 거부 + 체크섬 검증
-                               — GitHub JSON 형식은 모름(Kit의 파서가 담당)
-  SelfUpdatePlan.swift         자가교체 계획 데이터 + shellQuote 보안 불변식 (pure)
-                               — 셸 스크립트 텍스트는 Kit가 생성
-  DiagnoseArgs.swift           diagnose 공통 인자(--current/--feed) 파싱 (pure)
-  TranslocationCheck.swift     설치 위치 판정 (translocated/쓰기불가/교체가능)
-  ProximityTypes / Devices / UnlockOutcome  도메인 타입
+- **AutoLockCore** — 순수 도메인(Foundation only). 근접·잠금·업데이트 결정 로직을
+  부수효과 없이 담아 단위 테스트됩니다.
+- **AutoLockKit** — 컨트롤러 계층. 상태 머신과 BLE/설정 배선을 맡고, 시스템 부수효과는
+  프로토콜로 주입받습니다.
+- **AutoLock** — 조립 루트 + 메뉴바 UI + 시스템 API 어댑터(executable).
 
-Sources/AutoLockKit/           컨트롤러 계층 (시스템 부수효과는 프로토콜 주입)
-  ProximityController.swift    상태 머신 — 순수 evaluator를 배선 (@MainActor)
-  BLEScanner.swift             CoreBluetooth 스캐너 + RSSI 평활화 (@MainActor)
-  Settings.swift               UserDefaults 영속화 (@MainActor)
-  ProximityServices.swift      ScreenLocking/DisplayWaking 등 주입 프로토콜
-  UpdateController.swift       업데이트 상태 머신 — 자가교체/검증 흐름 배선 (@MainActor)
-  GitHubReleaseParser.swift    GitHub 릴리스 JSON 형식 어댑터 → Core.select 위임
-  SelfUpdateScript.swift       자가교체 /bin/sh 헬퍼 스크립트 생성 (교체 메커니즘)
-
-Sources/AutoLock/              조립 루트 + UI + 시스템 API 어댑터 (executable)
-  AutoLockApp.swift            SwiftUI MenuBarExtra entry point
-  main.swift                   진입점 (GUI vs diagnose 분기)
-  ProximityServiceAdapters.swift  시스템 구현 → Kit 프로토콜 어댑터
-  UpdateAdapters.swift         GitHub 클라이언트·다운로드·검증·자가교체 설치 어댑터
-  MenuView.swift               메뉴바 UI
-  DesignSystem.swift           공용 디자인 토큰 + 재사용 뷰
-  DevicePickerView.swift       디바이스 선택 화면
-  PasswordSheetView.swift      자동해제 암호 입력 화면
-  ScreenLocker.swift           SACLockScreenImmediate 호출
-  WakeController.swift         IOPMAssertionDeclareUserActivity 화면 wake
-  UnlockTrigger.swift          자동 해제 — CGEvent로 암호 키스트로크 합성
-  KeychainStore.swift          legacy Keychain 래퍼 (무프롬프트 ACL)
-  CountdownOverlay.swift       화면 정중앙 카운트다운 NSPanel (마지막 5초)
-  PermissionPrompt.swift       첫 실행 권한 안내 다이얼로그
-  LaunchAtLogin.swift          SMAppService 래퍼
-  PickerWindow / PasswordWindow.swift  픽커·암호 입력용 NSWindow
-  Diagnostics.swift            diagnose 서브커맨드 (실기기 시스템 API 점검)
-
-Tests/AutoLockCoreTests/       순수 도메인 단위 테스트
-Tests/AutoLockKitTests/        컨트롤러 배선 + 타임라인 리플레이 테스트
-Resources/                     Info.plist, 아이콘
-scripts/render_icon.swift      SVG → iconset → icns 변환
-scripts/test.sh                Xcode 없는 환경용 swift-testing 실행 래퍼
-build_app.sh                   SPM 결과를 AutoLock.app으로 패키징
-release.sh                     DMG + ZIP 배포 빌드
-```
+파일 단위 책임은 각 소스의 상단 주석에 적혀 있습니다.
 
 ## 빌드 요구사항
 
