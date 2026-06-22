@@ -91,7 +91,7 @@ enum KeychainStore {
             setContentsFailed: setContentsFailed
         )
         if aclOutcome != .configured {
-            NSLog("AutoLock: keychain ACL build incomplete (\(aclOutcome)) — saving with default ACL; reads may prompt")
+            AppLog.system.error("keychain ACL build incomplete (\(String(describing: aclOutcome), privacy: .public)) — saving with default ACL; reads may prompt")
         }
 
         var attrs = baseQuery
@@ -102,7 +102,7 @@ enum KeychainStore {
 
         let addStatus = SecItemAdd(attrs as CFDictionary, nil)
         if addStatus != errSecSuccess {
-            NSLog("AutoLock: keychain SecItemAdd failed (status \(addStatus))")
+            AppLog.system.error("keychain SecItemAdd failed (status \(addStatus, privacy: .public))")
         }
         return addStatus == errSecSuccess
     }

@@ -28,6 +28,11 @@ public final class ProximityController: ObservableObject {
     /// Reset whenever the screen unlocks so the next lock cycle can wake again.
     private var wakeFiredForCurrentLock: Bool = false
 
+    /// 마지막으로 로깅한 깨우기-스킵 사유의 종류. `maybeWakeDisplay()`가 매 틱
+    /// (1초) 호출되므로, 같은 사유가 이어질 때 로그가 도배되지 않도록 사유 종류가
+    /// 바뀔 때만 한 줄 남기기 위한 dedup 키다.
+    private var lastLoggedSkipKind: String? = nil
+
     public init(
         scanner: ProximityScanning,
         settings: Settings,
@@ -161,9 +166,12 @@ public final class ProximityController: ObservableObject {
             overlay.hide()
             if !screenLocker.isScreenLocked() {
                 let ok = screenLocker.lock()
-                NSLog("AutoLock: lock invoked (\(ok ? "ok" : "failed")) reason=\(reason.logDescription)")
+                AppLog.proximity.info("lock invoked (\(ok ? "ok" : "failed", privacy: .public)) reason=\(reason.logDescription, privacy: .public)")
                 if ok {
                     wakeFiredForCurrentLock = false
+                    // 새 잠금 세션 시작 — 스킵 사유 dedup 키를 비워 다음 깨우기
+                    // 평가의 첫 스킵 사유가 반드시 한 줄 기록되게 한다.
+                    lastLoggedSkipKind = nil
                 } else {
                     // Don't pretend we locked. Surface the failure and keep the
                     // pre-lock away-cycle start so the next tick retries locking
@@ -192,26 +200,36 @@ public final class ProximityController: ObservableObject {
         )
 
         switch action {
-        case .doNothing:
+        case .doNothing(let reason):
+            // 매 틱(1초) 반복되므로 사유 종류가 바뀔 때만 한 줄 남긴다. 이래야
+            // "PC 앞에 왔는데 왜 안 풀렸나"를 도배 없이 로그로 추적할 수 있다.
+            if lastLoggedSkipKind != reason.kind {
+                lastLoggedSkipKind = reason.kind
+                AppLog.wake.info("skip auto-wake: \(reason.logDescription, privacy: .public)")
+            }
             return
         case .armForNextLock:
             // User unlocked — arm wake for the next lock cycle.
             wakeFiredForCurrentLock = false
         case .attemptUnlock:
+            // 발화 경로에 진입하면 dedup 키를 비워, 다음 잠금 세션의 첫 스킵 사유가
+            // 다시 기록되게 한다.
+            lastLoggedSkipKind = nil
             let result = unlocker.attempt()
-            NSLog("AutoLock: auto-unlock attempt result=\(result)")
+            AppLog.wake.info("auto-unlock attempt result=\(String(describing: result), privacy: .public)")
             // If the attempt couldn't run (no password / no Accessibility / no
             // event source), fall back to at least waking the display so the
             // user isn't left with a black screen and no way to authenticate.
             let followup = UnlockFollowup.decide(outcome: result)
             if followup.shouldWakeDisplay {
                 let ok = waker.wake()
-                NSLog("AutoLock: auto-unlock fallback wake (\(ok ? "ok" : "failed"))")
+                AppLog.wake.info("auto-unlock fallback wake (\(ok ? "ok" : "failed", privacy: .public))")
             }
             wakeFiredForCurrentLock = followup.latchFired
         case .wakeDisplay:
+            lastLoggedSkipKind = nil
             let ok = waker.wake()
-            NSLog("AutoLock: proximity wake (\(ok ? "ok" : "failed"))")
+            AppLog.wake.info("proximity wake (\(ok ? "ok" : "failed", privacy: .public))")
             wakeFiredForCurrentLock = true
         }
     }

@@ -78,7 +78,7 @@ enum UnlockTrigger {
 
     private static func postString(_ string: String) {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
-            NSLog("AutoLock: failed to create event source for password keystrokes")
+            AppLog.wake.error("failed to create event source for password keystrokes")
             return
         }
         // CGEventKeyboardSetUnicodeString lets us avoid building a keycode map
@@ -92,7 +92,7 @@ enum UnlockTrigger {
                 // Surface the failure instead of dropping a character silently —
                 // the auto-unlock will be incomplete and the user must fall back
                 // to manual auth.
-                NSLog("AutoLock: failed to create key event for password character")
+                AppLog.wake.error("failed to create key event for password character")
                 continue
             }
             utf16.withUnsafeBufferPointer { buf in
@@ -108,13 +108,13 @@ enum UnlockTrigger {
 
     private static func postReturnKey() {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
-            NSLog("AutoLock: failed to create event source for Return key")
+            AppLog.wake.error("failed to create event source for Return key")
             return
         }
         // 36 == kVK_Return
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x24, keyDown: true),
               let up = CGEvent(keyboardEventSource: source, virtualKey: 0x24, keyDown: false) else {
-            NSLog("AutoLock: failed to create Return key event")
+            AppLog.wake.error("failed to create Return key event")
             return
         }
         down.post(tap: .cghidEventTap)

@@ -208,7 +208,7 @@ final class SpyUnlocker: UnlockTriggering {
     @Test func wakesDisplayWhenLocked() {
         let settings = makeSettings()
         settings.enabled = true
-        settings.thresholdMagnitude = 70      // threshold -70, wake 경계 -50
+        settings.thresholdMagnitude = 70      // threshold -70, wake 경계 -60
         settings.wakeOnProximity = true
         settings.autoUnlock = false
         settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))

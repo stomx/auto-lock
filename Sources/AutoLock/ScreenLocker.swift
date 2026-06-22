@@ -15,20 +15,20 @@ enum ScreenLocker {
             "/System/Library/PrivateFrameworks/login.framework/Versions/Current/login",
             RTLD_NOW
         ) else {
-            NSLog("AutoLock: dlopen(login.framework) failed: \(CStringSafe.string(from: dlerror(), fallback: "no error info"))")
+            AppLog.system.error("dlopen(login.framework) failed: \(CStringSafe.string(from: dlerror(), fallback: "no error info"), privacy: .public)")
             return false
         }
         defer { dlclose(handle) }
 
         guard let sym = dlsym(handle, "SACLockScreenImmediate") else {
-            NSLog("AutoLock: SACLockScreenImmediate symbol not found")
+            AppLog.system.error("SACLockScreenImmediate symbol not found")
             return false
         }
         typealias SACLockFn = @convention(c) () -> Int32
         let fn = unsafeBitCast(sym, to: SACLockFn.self)
         let rc = fn()
         if rc != 0 {
-            NSLog("AutoLock: SACLockScreenImmediate returned \(rc)")
+            AppLog.system.error("SACLockScreenImmediate returned \(rc, privacy: .public)")
         }
         return rc == 0
     }

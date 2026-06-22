@@ -150,7 +150,7 @@ enum Diagnostics {
             print("✅ 성공 — IOPMAssertionDeclareUserActivity 반환 성공.")
             exit(0)
         } else {
-            print("❌ 실패 — 콘솔 로그(NSLog)를 확인하세요.")
+            print("❌ 실패 — 통합 로그를 확인하세요: log show --last 5m --predicate 'subsystem == \"com.local.autolock\"' --info")
             exit(1)
         }
     }
@@ -212,7 +212,7 @@ enum Diagnostics {
             print("✅ 화면 잠금 호출 성공 (SACLockScreenImmediate).")
             exit(0)
         } else {
-            print("❌ 화면 잠금 실패 — 콘솔 로그(NSLog)를 확인하세요.")
+            print("❌ 화면 잠금 실패 — 통합 로그를 확인하세요: log show --last 5m --predicate 'subsystem == \"com.local.autolock\"' --info")
             exit(1)
         }
     }

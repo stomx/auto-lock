@@ -1,5 +1,6 @@
 import Foundation
 import ServiceManagement
+import AutoLockCore
 
 /// Wraps SMAppService.mainApp (macOS 13+) so users can toggle "open at login"
 /// from inside the menu bar. SMAppService persists the preference in the
@@ -10,8 +11,8 @@ enum LaunchAtLogin {
         SMAppService.mainApp.status == .enabled
     }
 
-    /// Returns true on success. Errors are logged via NSLog so the menu can
-    /// report a generic failure without leaking the underlying reason.
+    /// Returns true on success. Errors are logged via the unified log so the
+    /// menu can report a generic failure without leaking the underlying reason.
     @discardableResult
     static func setEnabled(_ enabled: Bool) -> Bool {
         let service = SMAppService.mainApp
@@ -27,7 +28,7 @@ enum LaunchAtLogin {
             }
             return true
         } catch {
-            NSLog("AutoLock: LaunchAtLogin toggle failed: \(error)")
+            AppLog.system.error("LaunchAtLogin toggle failed: \(String(describing: error), privacy: .public)")
             return false
         }
     }

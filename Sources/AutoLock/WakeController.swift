@@ -1,5 +1,6 @@
 import Foundation
 import IOKit.pwr_mgt
+import AutoLockCore
 
 /// Wakes the display when a tracked device comes back into proximity.
 ///
@@ -20,7 +21,7 @@ enum DisplayWaker {
             &assertionID
         )
         if rc != kIOReturnSuccess {
-            NSLog("AutoLock: IOPMAssertionDeclareUserActivity failed rc=\(rc)")
+            AppLog.wake.error("IOPMAssertionDeclareUserActivity failed rc=\(rc, privacy: .public)")
             return false
         }
         return true

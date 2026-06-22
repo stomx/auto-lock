@@ -49,7 +49,12 @@ public enum LockTuning {
     /// before we wake the display / attempt auto-unlock. Pure proximity-state
     /// equality is too lax — a phone in the next room can clip the threshold
     /// briefly and shouldn't light up the Mac.
-    public static let wakeMarginDBm: Double = 20
+    ///
+    /// 20dBm 마진은 Apple Watch 처럼 송신 출력이 약한 기기에선 너무 빡빡했다.
+    /// 임계값 -70 기준 발동선이 -50 이라, 손목을 키보드에 올려도 -50 을 못 넘어
+    /// 자동 해제가 영영 발화하지 않는 사례가 있었다(실측 근접 ~-63). 10 으로
+    /// 낮춰 발동선을 -60 으로 끌어내려 워치도 현실적으로 도달하게 한다.
+    public static let wakeMarginDBm: Double = 10
 
     /// Drop below the lock threshold by this many dBm and we skip the
     /// countdown entirely — the user is unambiguously gone.
