@@ -17,6 +17,9 @@ Resources/AppIcon.iconset/
 # Local bkit tool state — never publish.
 .bkit/
 
+# Cloudflare wrangler 로컬 상태 — 커밋 금지.
+.wrangler/
+
 # 작업 핸드오프 노트 — 로컬 전용, 커밋 금지.
 docs/00-HANDOFF.md
 

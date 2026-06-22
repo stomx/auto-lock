@@ -219,3 +219,7 @@ self-signed 서명(Apple 공증 없음)이라 동료가 첫 실행 시 Gatekeepe
 - Apple Silicon (arm64)
 - Swift 5.9+ (Xcode 15 또는 Command Line Tools)
 - (선택) Pretendard 폰트 — 설치되어 있으면 UI에 자동 적용, 없으면 시스템 폰트로 fallback
+
+## 라이선스
+
+[MIT](LICENSE) © Jaymon (stomx)
