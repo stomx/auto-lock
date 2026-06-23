@@ -66,8 +66,24 @@ enum UnlockTrigger {
 
         // Only the Sendable `password` crosses the closure boundary.
         DispatchQueue.main.asyncAfter(deadline: .now() + LockTuning.unlockKeystrokeDelaySeconds) {
-            postString(password)
+            // Re-check the lock state at the moment we're about to type. The
+            // `.dispatched` decision was made up to `unlockKeystrokeDelaySeconds`
+            // ago; during that window the user may have authenticated by Touch
+            // ID, Apple Watch, or by typing the password themselves. If we don't
+            // re-confirm here, the saved password is injected into whatever now
+            // has keyboard focus on the unlocked desktop (a chat box, a notes
+            // window, Spotlight…) — leaking the plaintext credential to the
+            // wrong place. Only type while the screen is still genuinely locked.
+            guard ScreenLocker.isScreenLocked() else {
+                AppLog.wake.error("screen unlocked before keystroke injection — aborting to avoid leaking password")
+                return
+            }
+            // `postString` stops mid-word if the screen unlocks during typing
+            // and reports whether it finished. We only send Return when the full
+            // password was typed into a still-locked screen.
+            guard postString(password) else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                guard ScreenLocker.isScreenLocked() else { return }
                 postReturnKey()
             }
         }
@@ -76,34 +92,56 @@ enum UnlockTrigger {
 
     // MARK: - Synthetic keystrokes
 
-    private static func postString(_ string: String) {
+    /// Types `string` into loginwindow one character at a time. Returns `true`
+    /// only when every character was posted while the screen stayed locked.
+    /// Returns `false` (and stops typing) if the screen unlocks mid-string, so
+    /// the caller knows not to follow up with Return — the remaining characters
+    /// would otherwise spill onto the now-unlocked desktop.
+    ///
+    /// The per-character lock re-check and the stop-on-unlock bookkeeping live in
+    /// the pure `UnlockKeystrokeSequencer` (unit-tested); this method only wires
+    /// in the system pieces — the lock probe and the `CGEvent` synthesis.
+    @discardableResult
+    private static func postString(_ string: String) -> Bool {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
             AppLog.wake.error("failed to create event source for password keystrokes")
-            return
+            return false
         }
         // CGEventKeyboardSetUnicodeString lets us avoid building a keycode map
         // for every locale and special character. Each character is sent as a
         // distinct down/up event so loginwindow's input handler doesn't merge
         // them into one composite event.
-        for char in string {
-            let utf16 = Array(String(char).utf16)
-            guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
-                  let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
-                // Surface the failure instead of dropping a character silently —
-                // the auto-unlock will be incomplete and the user must fall back
-                // to manual auth.
-                AppLog.wake.error("failed to create key event for password character")
-                continue
-            }
-            utf16.withUnsafeBufferPointer { buf in
-                if let base = buf.baseAddress {
-                    down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: base)
-                    up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: base)
+        let chars = Array(string)
+        let result = UnlockKeystrokeSequencer.runTyping(
+            characterCount: chars.count,
+            // Re-probed before every character: bail the instant the screen is
+            // no longer locked, so the rest of the password can't leak into
+            // whatever app now holds keyboard focus on the unlocked desktop.
+            isScreenLocked: { ScreenLocker.isScreenLocked() },
+            emit: { index in
+                let utf16 = Array(String(chars[index]).utf16)
+                guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                      let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
+                    // Surface the failure instead of dropping a character silently —
+                    // the auto-unlock will be incomplete and the user must fall back
+                    // to manual auth.
+                    AppLog.wake.error("failed to create key event for password character")
+                    return
                 }
+                utf16.withUnsafeBufferPointer { buf in
+                    if let base = buf.baseAddress {
+                        down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: base)
+                        up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: base)
+                    }
+                }
+                down.post(tap: .cghidEventTap)
+                up.post(tap: .cghidEventTap)
             }
-            down.post(tap: .cghidEventTap)
-            up.post(tap: .cghidEventTap)
+        )
+        if !result.completed {
+            AppLog.wake.error("screen unlocked mid-typing — aborted after \(result.typedCount) password keystrokes")
         }
+        return result.completed
     }
 
     private static func postReturnKey() {
