@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { motion, useScroll, useTransform } from 'framer-motion'
+import { m, useScroll, useTransform } from 'framer-motion'
 import { useMotionEnabled } from '../lib/motion.js'
 import { asset } from '../lib/asset.js'
 import { HERO, LATEST_VERSION } from '../data/content.js'
@@ -28,21 +28,21 @@ export default function ParallaxHero() {
 
   return (
     <header className="hero" id="hero" ref={ref}>
-      <motion.div className="hero-glow" style={sGlow} aria-hidden="true" />
+      <m.div className="hero-glow" style={sGlow} aria-hidden="true" />
       <div className="wrap hero-content">
-        <motion.img
+        <m.img
           className="hero-logo"
           src={asset('images/icon.svg')}
           alt="AutoLock 아이콘"
           style={sIcon}
         />
-        <motion.div style={sText}>
+        <m.div style={sText}>
           <h1>{HERO.title}</h1>
           <p className="hero-tagline">{HERO.tagline}</p>
           <p className="hero-sub">{HERO.sub}</p>
           <DownloadButtons variant="hero" />
           <p className="hero-req">최신 버전 {LATEST_VERSION} · 첫 실행 시 Bluetooth 권한 허용 필요</p>
-        </motion.div>
+        </m.div>
       </div>
     </header>
   )

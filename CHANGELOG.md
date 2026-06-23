@@ -3,6 +3,26 @@
 이 프로젝트의 변경 사항을 기록합니다. 형식은 [Keep a Changelog](https://keepachangelog.com/ko/1.1.0/)를
 따르고, 버전 번호는 [Semantic Versioning](https://semver.org/lang/ko/)을 따릅니다.
 
+## [0.5.2] — 2026-06-22
+
+### Fixed
+- **자동 잠금 해제 발동선을 낮춤(−50 → −60 dBm).** 깨우기/자동해제 마진을
+  20 → 10 dBm 으로 조정. 송신 출력이 약한 Apple Watch 는 손목을 키보드에
+  올려도 −50 을 넘기 어려워 자동 해제가 영영 발화하지 않는 사례가 있었다.
+  발동선을 끌어내려 워치도 현실적으로 도달하게 한다.
+
+### Changed
+- **로깅을 통합 로깅(os.Logger)으로 전환.** 기존 `NSLog` 는 GUI 릴리스 빌드에서
+  `log show`·Console 에 신뢰성 있게 실리지 않아 "자동 해제가 왜 발화하지
+  않았는가"를 사후 추적할 수 없었다. subsystem `com.local.autolock` 으로 전환해
+  항상 조회 가능하게 한다:
+  `log stream --predicate 'subsystem == "com.local.autolock"' --level info`
+- **자동 해제 미발동 사유를 로깅.** 발화하지 않은 이유(약신호+실측 RSSI/발동선,
+  이미 발화, 기기 미탐지, 토글 꺼짐)를 사유별로 남긴다. 매 틱 도배를 막기 위해
+  사유 종류가 바뀔 때만 한 줄 기록.
+- 정상 동작 로그는 `.info`(평소 디스크 미저장), 실패만 `.error`(디스크 보존)로
+  분리해 저장용량 부담을 최소화. 테스트 181 → 183건.
+
 ## [0.5.1] — 2026-06-22
 
 ### Changed

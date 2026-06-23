@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { motion, useScroll, useTransform } from 'framer-motion'
+import { m, useScroll, useTransform } from 'framer-motion'
 import { useMotionEnabled } from '../lib/motion.js'
 import { asset } from '../lib/asset.js'
 
@@ -20,7 +20,7 @@ export default function ParallaxImage({ src, alt, strength = 40, className }) {
   }
 
   return (
-    <motion.img
+    <m.img
       ref={ref}
       src={asset(src)}
       alt={alt}

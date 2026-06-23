@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { motion, AnimatePresence, useScroll, useTransform, useInView } from 'framer-motion'
+import { m, AnimatePresence, useScroll, useTransform, useInView } from 'framer-motion'
 import { useMotionEnabled } from '../lib/motion.js'
 
 // 실제 CountdownOverlay(앱)를 CSS로 재현 + 5→4→3→2→1→잠금 순환 애니메이션.
@@ -62,7 +62,7 @@ export default function CountdownAnimation() {
          aria-label="카운트다운 오버레이 미리보기">
       {enabled ? (
         <AnimatePresence mode="wait">
-          <motion.div
+          <m.div
             key={String(value)}
             className="cd-digit"
             initial={{ opacity: 0, scale: 0.6 }}
@@ -71,7 +71,7 @@ export default function CountdownAnimation() {
             transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
           >
             {isLock ? <LockGlyph /> : value}
-          </motion.div>
+          </m.div>
         </AnimatePresence>
       ) : (
         <div className="cd-digit">5</div>
@@ -84,8 +84,8 @@ export default function CountdownAnimation() {
   }
 
   return (
-    <motion.div ref={ref} style={{ y, willChange: 'transform' }}>
+    <m.div ref={ref} style={{ y, willChange: 'transform' }}>
       {box}
-    </motion.div>
+    </m.div>
   )
 }

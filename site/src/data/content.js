@@ -2,11 +2,25 @@
 // 내용은 여기서 가져와, 문구 수정 시 컴포넌트를 건드릴 필요가 없다.
 
 export const REPO = 'https://github.com/stomx/auto-lock'
-export const LATEST_VERSION = 'v0.5.1'
-// releases/latest/download/... 는 버전이 올라가도 항상 최신을 가리킨다.
-export const DOWNLOAD_DMG = `${REPO}/releases/latest/download/AutoLock-0.5.1-arm64.dmg`
+
+// 버전 단일 출처: 루트 CHANGELOG.md 최상단 릴리스. vite.config.js가 빌드 타임에
+// __APP_VERSION__('0.5.2' 등)으로 주입한다. 같은 값이 index.html JSON-LD에도 주입됨.
+export const LATEST_VERSION = `v${__APP_VERSION__}` // 예: 'v0.5.2'
+
 export const RELEASES_URL = `${REPO}/releases/latest`
 export const INSTALL_URL = `${REPO}/blob/main/INSTALL.md`
+
+// 변경 이력 원문(main 브랜치 CHANGELOG.md). 사람이 보는 GitHub 링크와,
+// 브라우저에서 직접 받아 렌더하는 raw 링크. raw는 CORS 허용(*)·5분 캐시.
+export const CHANGELOG_URL = `${REPO}/blob/main/CHANGELOG.md`
+export const CHANGELOG_RAW_URL = 'https://raw.githubusercontent.com/stomx/auto-lock/main/CHANGELOG.md'
+
+// 다운로드 폴백 = releases/latest(최신 릴리스 페이지, 항상 살아있음).
+// 직접 .dmg 링크(releases/latest/download/AutoLock-<버전>-arm64.dmg)는 자산
+// 파일명에 버전이 박혀 있어, 새 릴리스가 나오고 사이트 재배포 전이면 파일명이
+// 어긋나 404가 된다(최초 버그의 원인). 그래서 폴백은 릴리스 페이지로 두고,
+// JS가 동작하는 방문자는 useLatestDmg가 실제 .dmg URL로 교체한다.
+export const DOWNLOAD_DMG = RELEASES_URL
 
 export const HERO = {
   title: '자리를 비우면, Mac이 알아서 잠깁니다',

@@ -1,9 +1,11 @@
 import { Link, NavLink } from 'react-router-dom'
 import { asset } from '../lib/asset.js'
-import { REPO, DOWNLOAD_DMG } from '../data/content.js'
+import { REPO } from '../data/content.js'
+import { useLatestDmg } from '../lib/release.js'
 import ThemeControls from './ThemeControls.jsx'
 
 export default function NavBar() {
+  const { href: downloadHref } = useLatestDmg()
   return (
     <nav className="nav">
       <div className="wrap nav-inner">
@@ -21,7 +23,7 @@ export default function NavBar() {
           <a href={REPO} target="_blank" rel="noreferrer">
             GitHub ↗
           </a>
-          <a className="nav-download" href={DOWNLOAD_DMG}>
+          <a className="nav-download" href={downloadHref}>
             다운로드
           </a>
           <ThemeControls />
