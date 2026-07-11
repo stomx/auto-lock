@@ -128,6 +128,7 @@ struct StubError: Error {}
         let c = makeController(checker: FakeUpdateChecker(.success(release("v0.3.2"))))
         await c.check()
         #expect(c.state == .available(release("v0.3.2")))
+        #expect(c.availableRelease == release("v0.3.2"))
     }
 
     // 3. 같은 버전 → upToDate.
@@ -135,6 +136,7 @@ struct StubError: Error {}
         let c = makeController(checker: FakeUpdateChecker(.success(release("v0.3.1"))))
         await c.check()
         #expect(c.state == .upToDate)
+        #expect(c.availableRelease == nil)
     }
 
     // 4. 조회 실패 → failed.
@@ -215,6 +217,24 @@ struct StubError: Error {}
         await c.downloadAndInstall()
         #expect(su.installCount == 0)
         if case .unsupported = c.state {} else { Issue.record("expected .unsupported, got \(c.state)") }
+    }
+
+    @Test func unsupportedCanDownloadAndOpenDMGFallback() async {
+        let su = SpySelfReplacing(); su.canUpdate = false
+        let opener = SpyDMGOpener()
+        let dl = FakeDownloader(.success(URL(fileURLWithPath: "/tmp/AutoLock-fallback.dmg")))
+        let c = makeController(
+            checker: FakeUpdateChecker(.success(releaseWithZip("v0.3.2"))),
+            downloader: dl,
+            opener: opener,
+            selfUpdater: su
+        )
+        await c.check()
+        await c.downloadAndInstall()
+        await c.downloadAndOpen()
+        #expect(await dl.count() == 1)
+        #expect(opener.opened == [URL(fileURLWithPath: "/tmp/AutoLock-fallback.dmg")])
+        if case .opened = c.state {} else { Issue.record("expected .opened, got \(c.state)") }
     }
 
     // 11. self-updater 미주입 → unsupported(폴백 경로).

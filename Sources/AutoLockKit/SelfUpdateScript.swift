@@ -30,18 +30,50 @@ public enum SelfUpdateScript {
             sleep 0.1
             i=$((i + 1))
         done
+        if kill -0 "$PARENT" 2>/dev/null; then
+            exit 1
+        fi
 
-        # 2) Replace the bundle in place. ditto preserves perms/xattrs.
-        rm -rf "$TARGET" || exit 1
-        /usr/bin/ditto "$STAGING" "$TARGET" || exit 1
+        # 2) Keep a same-volume backup, then atomically rename the staged app.
+        #    Never delete the only known-good app before the new one is live.
+        BACKUP="${TARGET}.autolock-backup"
+        MARKER="${TARGET}.autolock-health"
+        rm -rf "$BACKUP"
+        rm -f "$MARKER"
+        /bin/mv "$TARGET" "$BACKUP" || exit 1
+        if ! /bin/mv "$STAGING" "$TARGET"; then
+            /bin/mv "$BACKUP" "$TARGET"
+            exit 1
+        fi
 
         # 3) Drop quarantine so Gatekeeper doesn't re-prompt on relaunch.
         /usr/bin/xattr -dr com.apple.quarantine "$TARGET" 2>/dev/null
 
-        # 4) Relaunch the updated app, then clean up staging + this script.
+        # 4) Launch the new executable with a health-marker argument. The app
+        #    writes the marker immediately before entering SwiftUI's main loop.
+        "$TARGET/Contents/MacOS/AutoLock" --post-update-marker "$MARKER" >/dev/null 2>&1 &
+        NEW_PID=$!
+        i=0
+        while [ ! -f "$MARKER" ] && kill -0 "$NEW_PID" 2>/dev/null && [ "$i" -lt 100 ]; do
+            sleep 0.1
+            i=$((i + 1))
+        done
+
+        if [ -f "$MARKER" ]; then
+            rm -rf "$BACKUP"
+            rm -f "$MARKER"
+            rm -rf "$(dirname "$STAGING")"
+            exit 0
+        fi
+
+        # 5) New app did not reach its entry point: stop it, restore the backup,
+        #    and relaunch the known-good app.
+        kill "$NEW_PID" 2>/dev/null || true
+        rm -rf "$TARGET"
+        /bin/mv "$BACKUP" "$TARGET" || exit 1
         /usr/bin/open "$TARGET"
-        rm -rf "$STAGING"
-        rm -f "$0"
+        rm -rf "$(dirname "$STAGING")"
+        exit 1
         """
     }
 }

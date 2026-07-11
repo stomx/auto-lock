@@ -5,11 +5,12 @@ import SwiftUI
 /// `DesignSystem.swift`. `ASCIISecureField` lives in `PasswordWindow.swift`.
 struct PasswordSheetView: View {
     let hasPassword: Bool
-    let onSave: (String) -> Void
-    let onDelete: () -> Void
+    let onSave: (String) -> Bool
+    let onDelete: () -> Bool
     let onCancel: () -> Void
 
     @State private var password: String = ""
+    @State private var errorMessage: String?
     @FocusState private var fieldFocused: Bool
 
     var body: some View {
@@ -38,9 +39,18 @@ struct PasswordSheetView: View {
                         .strokeBorder(Palette.stroke, lineWidth: 0.5)
                 )
 
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(AppFont.pretendard(12, weight: .medium))
+                    .foregroundStyle(Palette.crimson)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack {
                 if hasPassword {
-                    Button("저장된 암호 삭제") { onDelete() }
+                    Button("저장된 암호 삭제") {
+                        if !onDelete() { errorMessage = "Keychain에서 암호를 삭제하지 못했습니다." }
+                    }
                         .buttonStyle(.plain)
                         .font(AppFont.pretendard(13, weight: .medium))
                         .foregroundStyle(Palette.crimson)
@@ -57,7 +67,9 @@ struct PasswordSheetView: View {
                             .strokeBorder(Palette.stroke, lineWidth: 0.5)
                     )
                     .keyboardShortcut(.cancelAction)
-                Button("저장") { onSave(password) }
+                Button("저장") {
+                    if !onSave(password) { errorMessage = "AutoLock 전용 접근 제어를 만들지 못해 암호를 저장하지 않았습니다." }
+                }
                     .buttonStyle(.plain)
                     .font(AppFont.pretendard(13, weight: .bold))
                     .foregroundStyle(Palette.onLime)

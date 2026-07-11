@@ -73,6 +73,11 @@ security set-key-partition-list -S apple-tool:,apple:,codesign: \
 codesign -d -r- dist/AutoLock.app   # designated => ... certificate leaf = H"..." 확인
 ```
 
+릴리스 인증서의 SHA-1 leaf는 `scripts/release-cert-leaf.txt`에 고정되어 있습니다.
+같은 이름의 새 인증서를 만드는 것만으로는 연속성이 유지되지 않습니다. 다른 빌드
+머신에서는 반드시 백업한 `.p12`를 import해야 하며, `release.sh`는 leaf가 다르면
+산출물 생성을 중단합니다.
+
 다른 식별자 이름을 쓰려면 환경변수로:
 
 ```bash

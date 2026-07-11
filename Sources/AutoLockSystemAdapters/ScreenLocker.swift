@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 import AutoLockCore
 
-enum ScreenLocker {
+public enum ScreenLocker {
     /// Trigger the standard macOS screen lock.
     ///
     /// We call `SACLockScreenImmediate` from the private login.framework, which is
@@ -10,7 +10,7 @@ enum ScreenLocker {
     /// Ctrl+Cmd+Q. The legacy `User.menu/CGSession -suspend` binary was removed
     /// in recent macOS releases, so we don't fall back to it.
     @discardableResult
-    static func lock() -> Bool {
+    public static func lock() -> Bool {
         guard let handle = dlopen(
             "/System/Library/PrivateFrameworks/login.framework/Versions/Current/login",
             RTLD_NOW
@@ -33,7 +33,7 @@ enum ScreenLocker {
         return rc == 0
     }
 
-    static func isScreenLocked() -> Bool {
+    public static func isScreenLocked() -> Bool {
         guard let dict = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
         return (dict["CGSSessionScreenIsLocked"] as? Bool) ?? false
     }

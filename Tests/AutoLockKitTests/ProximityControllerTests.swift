@@ -401,6 +401,7 @@ final class SpyUnlocker: UnlockTriggering {
         let scanner = FakeScanner()
         let c = makeController(settings: settings, scanner: scanner)
         _ = c   // 구독 유지
+        #expect(scanner.gracePeriodProvider() == LockTuning.fixedGracePeriodSeconds)
 
         // init 시점에 enabled=false를 1회 받아 stopScanning 호출됨.
         let baselineStop = scanner.stopCount
@@ -410,5 +411,39 @@ final class SpyUnlocker: UnlockTriggering {
 
         settings.enabled = false
         #expect(scanner.stopCount == baselineStop + 1)
+    }
+
+    @Test func menuBarIconRepresentsEveryControllerState() {
+        let settings = makeSettings()
+        let scanner = FakeScanner()
+        let c = makeController(settings: settings, scanner: scanner)
+        #expect(c.menuBarIcon == "lock.open.fill")       // disabled
+
+        settings.enabled = true
+        c.evaluate()
+        #expect(c.menuBarIcon == "lock.slash")           // unknown
+
+        settings.thresholdMagnitude = 70
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 1)]
+        c.evaluate()
+        #expect(c.menuBarIcon == "lock.open.fill")       // near
+
+        scanner.devices = [deviceID: discovered(rssi: -75, ageSeconds: 1)]
+        c.evaluate()
+        #expect(c.menuBarIcon == "lock.rotation")        // borderline
+
+        scanner.devices = [deviceID: discovered(rssi: -95, ageSeconds: 1)]
+        c.evaluate()
+        #expect(c.menuBarIcon == "lock.fill")            // away
+    }
+
+    @Test func evaluationTimerActuallyEvaluates() async throws {
+        let settings = makeSettings()
+        settings.enabled = true
+        let c = makeController(settings: settings)
+        #expect(c.status == .watching)
+        try await Task.sleep(for: .seconds(1.1))
+        #expect(c.status == .awaitingDevice)
     }
 }

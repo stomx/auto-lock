@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import AutoLockCore
 import AutoLockKit
+import AutoLockSystemAdapters
 
 // Design tokens (Palette/AppFont) and reusable views (Surface, Caption,
 // ParameterDial, DotPulse, GhostButtonStyle) now live in DesignSystem.swift.
@@ -18,6 +19,7 @@ struct MenuView: View {
     @State private var helpExpanded: Bool = false
     @State private var hasPassword: Bool = KeychainStore.hasPassword()
     @State private var hasAccessibility: Bool = UnlockTrigger.hasAccessibility()
+    @State private var keychainError: String?
     /// Re-checks the AX trust on a cadence so the badge flips green the moment
     /// the user grants Accessibility in System Settings. `AXIsProcessTrustedWithOptions`
     /// is cheap (microseconds) so polling while the menu is open is fine. We do
@@ -49,6 +51,17 @@ struct MenuView: View {
         .onReceive(permissionTimer) { _ in
             let ax = UnlockTrigger.hasAccessibility()
             if ax != hasAccessibility { hasAccessibility = ax }
+        }
+        .alert(
+            "Keychain 오류",
+            isPresented: Binding(
+                get: { keychainError != nil },
+                set: { if !$0 { keychainError = nil } }
+            )
+        ) {
+            Button("확인", role: .cancel) { keychainError = nil }
+        } message: {
+            Text(keychainError ?? "저장된 암호를 처리하지 못했습니다.")
         }
     }
 
@@ -213,7 +226,25 @@ struct MenuView: View {
                 )
                 optionToggle(
                     title: "근접 시 자동 잠금 해제",
-                    isOn: $settings.autoUnlock
+                    isOn: Binding(
+                        get: { settings.autoUnlock },
+                        set: { enabled in
+                            if enabled {
+                                let migration = KeychainStore.migrateLegacyUnrestrictedItemIfNeeded()
+                                if migration == .failed {
+                                    keychainError = "이전 Keychain 암호의 보안 마이그레이션에 실패해 자동 잠금 해제를 켜지 않았습니다."
+                                } else {
+                                    if migration == .credentialRemoved { hasPassword = false }
+                                    settings.autoUnlock = true
+                                }
+                            } else if KeychainStore.delete() {
+                                settings.autoUnlock = false
+                                hasPassword = false
+                            } else {
+                                keychainError = "자동 잠금 해제를 끄려면 저장된 로그인 암호를 삭제해야 합니다. Keychain 삭제에 실패해 설정을 유지했습니다."
+                            }
+                        }
+                    )
                 )
 
                 if settings.autoUnlock {

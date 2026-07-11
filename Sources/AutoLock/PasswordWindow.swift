@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Carbon
+import AutoLockSystemAdapters
 
 /// Standalone window for the auto-unlock password sheet.
 ///
@@ -56,13 +57,18 @@ enum PasswordWindow {
                 onSave: { pw in
                     if KeychainStore.save(password: pw) {
                         onSaved()
+                        close()
+                        return true
                     }
-                    close()
+                    return false
                 },
                 onDelete: {
-                    KeychainStore.delete()
-                    onSaved()
-                    close()
+                    if KeychainStore.delete() {
+                        onSaved()
+                        close()
+                        return true
+                    }
+                    return false
                 },
                 onCancel: { close() }
             )

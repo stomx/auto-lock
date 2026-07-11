@@ -19,17 +19,24 @@ import Foundation
 /// via `emit`, keeping this layer free of system dependencies and unit-testable.
 public enum UnlockKeystrokeSequencer {
     public struct TypingResult: Equatable {
+        public enum StopReason: Equatable {
+            case completed
+            case screenUnlocked
+            case emissionFailed
+        }
+
         /// How many characters were actually emitted before the loop stopped.
         public let typedCount: Int
         /// True only when every character was emitted while the screen stayed
         /// locked. False means the screen unlocked mid-sequence and the caller
         /// MUST NOT send Return — the remaining input would spill onto the
         /// unlocked desktop.
-        public let completed: Bool
+        public let stopReason: StopReason
+        public var completed: Bool { stopReason == .completed }
 
-        public init(typedCount: Int, completed: Bool) {
+        public init(typedCount: Int, stopReason: StopReason) {
             self.typedCount = typedCount
-            self.completed = completed
+            self.stopReason = stopReason
         }
     }
 
@@ -43,16 +50,18 @@ public enum UnlockKeystrokeSequencer {
     public static func runTyping(
         characterCount: Int,
         isScreenLocked: () -> Bool,
-        emit: (Int) -> Void
+        emit: (Int) -> Bool
     ) -> TypingResult {
         var typed = 0
         for index in 0..<max(0, characterCount) {
             guard isScreenLocked() else {
-                return TypingResult(typedCount: typed, completed: false)
+                return TypingResult(typedCount: typed, stopReason: .screenUnlocked)
             }
-            emit(index)
+            guard emit(index) else {
+                return TypingResult(typedCount: typed, stopReason: .emissionFailed)
+            }
             typed += 1
         }
-        return TypingResult(typedCount: typed, completed: true)
+        return TypingResult(typedCount: typed, stopReason: .completed)
     }
 }

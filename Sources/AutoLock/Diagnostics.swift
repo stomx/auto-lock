@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import AutoLockKit
 import AutoLockCore
+import AutoLockSystemAdapters
 
 /// 진단 서브커맨드 모음. 실기기에서 시스템 API(BLE 스캔, 디스플레이 깨우기,
 /// 카운트다운 오버레이, 화면 잠금 상태/잠금)를 격리 실행해 "기능이 실제로

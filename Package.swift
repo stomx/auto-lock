@@ -22,9 +22,17 @@ let package = Package(
             dependencies: ["AutoLockCore"],
             path: "Sources/AutoLockKit"
         ),
+        // Concrete macOS boundaries (Security, AppKit, IOKit, update I/O).
+        // Kept out of the executable so verification and adapter policy can be
+        // tested without launching the menu-bar application.
+        .target(
+            name: "AutoLockSystemAdapters",
+            dependencies: ["AutoLockKit", "AutoLockCore"],
+            path: "Sources/AutoLockSystemAdapters"
+        ),
         .executableTarget(
             name: "AutoLock",
-            dependencies: ["AutoLockKit"],
+            dependencies: ["AutoLockKit", "AutoLockSystemAdapters"],
             path: "Sources/AutoLock"
         ),
         .testTarget(
@@ -36,6 +44,11 @@ let package = Package(
             name: "AutoLockKitTests",
             dependencies: ["AutoLockKit"],
             path: "Tests/AutoLockKitTests"
+        ),
+        .testTarget(
+            name: "AutoLockSystemAdaptersTests",
+            dependencies: ["AutoLockSystemAdapters", "AutoLockKit", "AutoLockCore"],
+            path: "Tests/AutoLockSystemAdaptersTests"
         ),
     ]
 )

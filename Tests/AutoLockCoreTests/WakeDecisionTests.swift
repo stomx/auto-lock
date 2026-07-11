@@ -97,4 +97,9 @@ import Foundation
         #expect(a.kind == b.kind)
         #expect(a != b)  // Equatable 자체는 값을 구분
     }
+
+    @Test func belowWakeLineDescriptionIncludesObservedValues() {
+        let reason = WakeSkipReason.signalBelowWakeLine(rssi: -65.9, line: -60.1)
+        #expect(reason.logDescription == "signal-below-wakeline(rssi=-65 < line=-60)")
+    }
 }

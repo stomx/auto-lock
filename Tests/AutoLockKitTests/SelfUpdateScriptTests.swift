@@ -27,7 +27,7 @@ import AutoLockCore
         let s = SelfUpdateScript.text(for: plan())
         #expect(s.hasPrefix("#!/bin/sh"))
         #expect(s.contains("kill -0"))                       // 부모 종료 대기
-        #expect(s.contains("/usr/bin/ditto"))                // 번들 교체
+        #expect(s.contains("/bin/mv \"$STAGING\" \"$TARGET\"")) // 원자적 교체
         #expect(s.contains("xattr -dr com.apple.quarantine"))// Gatekeeper 재경고 방지
         #expect(s.contains("/usr/bin/open"))                 // 재실행
     }
@@ -56,26 +56,60 @@ import AutoLockCore
         ])
     }
 
-    // 단계 순서: 부모 대기 → (기존 제거 → 복사) → quarantine 제거 → 재실행.
+    // 단계 순서: 부모 대기 → 백업 → 원자적 교체 → quarantine 제거 → 재실행.
     // contains()만으로는 순서가 뒤바뀌어도 통과하므로 위치로 검증한다.
     @Test func stepsAreInSafeOrder() {
         let s = SelfUpdateScript.text(for: plan())
         let wait = index(of: "kill -0", in: s)
-        let remove = index(of: "rm -rf \"$TARGET\"", in: s)
-        let copy = index(of: "/usr/bin/ditto", in: s)
-        let relaunch = index(of: "/usr/bin/open", in: s)
-        #expect(wait != nil && remove != nil && copy != nil && relaunch != nil)
-        if let wait, let remove, let copy, let relaunch {
-            #expect(wait < remove)     // 부모가 죽기 전 번들을 건드리면 안 됨
-            #expect(remove < copy)     // 기존 제거 후 새 번들 복사
-            #expect(copy < relaunch)   // 복사 완료 후 재실행
+        let backup = index(of: "/bin/mv \"$TARGET\" \"$BACKUP\"", in: s)
+        let replace = index(of: "/bin/mv \"$STAGING\" \"$TARGET\"", in: s)
+        let relaunch = index(of: "--post-update-marker", in: s)
+        #expect(wait != nil && backup != nil && replace != nil && relaunch != nil)
+        if let wait, let backup, let replace, let relaunch {
+            #expect(wait < backup)
+            #expect(backup < replace)
+            #expect(replace < relaunch)
         }
     }
 
-    // 파괴적 단계(rm/ditto)는 실패 시 즉시 중단(|| exit 1)해 반쪽 교체를 막는다.
-    @Test func destructiveStepsFailClosed() {
+    @Test func failedReplaceAndFailedHealthBothRestoreBackup() {
         let s = SelfUpdateScript.text(for: plan())
-        #expect(s.contains("rm -rf \"$TARGET\" || exit 1"))
-        #expect(s.contains("/usr/bin/ditto \"$STAGING\" \"$TARGET\" || exit 1"))
+        #expect(s.contains("if ! /bin/mv \"$STAGING\" \"$TARGET\""))
+        #expect(s.components(separatedBy: "/bin/mv \"$BACKUP\" \"$TARGET\"").count == 3)
+        #expect(s.contains("kill \"$NEW_PID\""))
+        #expect(s.contains("[ -f \"$MARKER\" ]"))
+    }
+
+    @Test func helperAtomicallyReplacesAndKeepsHealthyApp() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let target = root.appendingPathComponent("AutoLock.app", isDirectory: true)
+        let stagingDir = root.appendingPathComponent(".staging", isDirectory: true)
+        let staged = stagingDir.appendingPathComponent("AutoLock.app", isDirectory: true)
+        let newExecutable = staged.appendingPathComponent("Contents/MacOS/AutoLock")
+        try fm.createDirectory(at: target, withIntermediateDirectories: true)
+        try "old".write(to: target.appendingPathComponent("payload"), atomically: true, encoding: .utf8)
+        try fm.createDirectory(at: newExecutable.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "#!/bin/sh\ntouch \"$2\"\nsleep 0.2\n".write(to: newExecutable, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: newExecutable.path)
+        try "new".write(to: staged.appendingPathComponent("payload"), atomically: true, encoding: .utf8)
+
+        let runtimePlan = SelfUpdatePlan(
+            parentPID: 999_999,
+            stagingAppPath: staged.path,
+            targetAppPath: target.path
+        )
+        let script = root.appendingPathComponent("helper.sh")
+        try SelfUpdateScript.text(for: runtimePlan).write(to: script, atomically: true, encoding: .utf8)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = [script.path] + runtimePlan.arguments
+        try process.run()
+        process.waitUntilExit()
+        defer { try? fm.removeItem(at: root) }
+
+        #expect(process.terminationStatus == 0)
+        #expect(try String(contentsOf: target.appendingPathComponent("payload"), encoding: .utf8) == "new")
+        #expect(!fm.fileExists(atPath: "\(target.path).autolock-backup"))
     }
 }

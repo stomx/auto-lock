@@ -59,4 +59,13 @@ import AutoLockCore
         #expect(observed.count == 1)
         #expect(s.thresholdMagnitude == 100)      // 항상 clamp된 값만 노출
     }
+
+    @Test func restoresPersistedTrackedDevices() throws {
+        let suite = "settings-decode-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let expected = [TrackedDevice(id: UUID(), name: "watch")]
+        defaults.set(try JSONEncoder().encode(expected), forKey: "trackedDevices")
+        let settings = Settings(defaults: defaults)
+        #expect(settings.trackedDevices == expected)
+    }
 }

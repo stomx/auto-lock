@@ -14,18 +14,18 @@ import AutoLockCore
 /// is delivered to loginwindow when Accessibility permission is granted; on
 /// some hardened configurations the OS drops them silently. We surface the
 /// outcome via the result enum so the UI can fall back to "wake-only".
-enum UnlockTrigger {
+public enum UnlockTrigger {
     /// Returns true when the system reports that this process is allowed to
     /// post synthetic keyboard events. We never *prompt* automatically — the
     /// caller decides when to show the system prompt to avoid surprising the user.
-    static func hasAccessibility(prompt: Bool = false) -> Bool {
+    public static func hasAccessibility(prompt: Bool = false) -> Bool {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         let options = [key: prompt] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
     }
 
     /// Open the System Settings pane where the user can grant Accessibility.
-    static func openAccessibilitySettings() {
+    public static func openAccessibilitySettings() {
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
         NSWorkspace.shared.open(url)
     }
@@ -44,7 +44,7 @@ enum UnlockTrigger {
     /// configurations. Any per-event creation failure inside the async block is
     /// logged (see `postString` / `postReturnKey`), and the controller wakes the
     /// display as a fallback whenever the synchronous gate fails.
-    static func attempt() -> UnlockOutcome {
+    public static func attempt() -> UnlockOutcome {
         let password = KeychainStore.load()
         // Probe event-source availability synchronously for the preflight, but
         // do NOT keep this instance: CGEventSource is non-Sendable and must not
@@ -126,7 +126,7 @@ enum UnlockTrigger {
                     // the auto-unlock will be incomplete and the user must fall back
                     // to manual auth.
                     AppLog.wake.error("failed to create key event for password character")
-                    return
+                    return false
                 }
                 utf16.withUnsafeBufferPointer { buf in
                     if let base = buf.baseAddress {
@@ -136,10 +136,11 @@ enum UnlockTrigger {
                 }
                 down.post(tap: .cghidEventTap)
                 up.post(tap: .cghidEventTap)
+                return true
             }
         )
         if !result.completed {
-            AppLog.wake.error("screen unlocked mid-typing — aborted after \(result.typedCount) password keystrokes")
+            AppLog.wake.error("password typing stopped (\(String(describing: result.stopReason), privacy: .public)) after \(result.typedCount) keystrokes")
         }
         return result.completed
     }

@@ -10,9 +10,9 @@ import AutoLockCore
 /// time the user reaches the Mac. `IOPMAssertionDeclareUserActivity` is the
 /// public API Apple recommends for this; it does not require any extra
 /// entitlements or accessibility permissions.
-enum DisplayWaker {
+public enum DisplayWaker {
     @discardableResult
-    static func wake() -> Bool {
+    public static func wake() -> Bool {
         var assertionID: IOPMAssertionID = IOPMAssertionID(0)
         let reason = "AutoLock proximity wake" as CFString
         let rc = IOPMAssertionDeclareUserActivity(

@@ -1,6 +1,7 @@
 import Foundation
 import AutoLockKit
 import AutoLockCore
+import AutoLockSystemAdapters
 
 /// 기존 enum/singleton 시스템 구현을 AutoLockKit 프로토콜에 맞추는 얇은 어댑터들.
 /// 조립 루트(AutoLockApp)에서 ProximityController에 주입한다.

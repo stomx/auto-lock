@@ -12,6 +12,7 @@ public enum UpdateError: Error, Equatable {
     case openFailed(String)
     case noZipAsset                  // self-update needs a .zip; release has none
     case unpackFailed(String)        // ditto -x failed / no .app inside
+    case verificationFailed(String)  // staged app identity/signature mismatch
     case replaceFailed(String)       // couldn't spawn the swap helper
 }
 
@@ -139,10 +140,14 @@ public final class UpdateController: ObservableObject {
     }
 
     /// Download the available release's DMG and open it. No-op unless we're in
-    /// `.available` (so a stray tap can't kick off a download) and nothing else
-    /// is in flight.
+    /// `.available` or `.unsupported` and nothing else is in flight.
     public func downloadAndOpen() async {
-        guard !isBusy, case .available(let release) = state else { return }
+        guard !isBusy else { return }
+        let release: ReleaseInfo
+        switch state {
+        case .available(let value), .unsupported(let value): release = value
+        default: return
+        }
         isBusy = true
         defer { isBusy = false }
 
@@ -193,6 +198,7 @@ public final class UpdateController: ObservableObject {
             case .openFailed(let m):     return "DMG 열기 실패: \(m)"
             case .noZipAsset:            return "릴리스에 자동 업데이트용 ZIP이 없습니다"
             case .unpackFailed(let m):   return "압축 해제 실패: \(m)"
+            case .verificationFailed(let m): return "업데이트 검증 실패: \(m)"
             case .replaceFailed(let m):  return "앱 교체 실패: \(m)"
             }
         }

@@ -4,8 +4,8 @@
 # Output: dist/AutoLock-<version>-arm64.dmg, dist/AutoLock-<version>-arm64.zip
 # plus SHA256 checksums.
 #
-# Codesigning: ad-hoc (no Apple Developer account). Recipients must allow
-# the app on first launch — see INSTALL.md.
+# Codesigning: fixed self-signed identity (no Apple Developer account).
+# Recipients must allow the app on first launch — see INSTALL.md.
 
 set -euo pipefail
 
@@ -15,11 +15,15 @@ cd "$ROOT"
 APP_NAME="AutoLock"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
 ARCH="arm64"
+PINNED_CERT_LEAF_FILE="$ROOT/scripts/release-cert-leaf.txt"
 
 DIST_DIR="$ROOT/dist"
 APP_DIR="$DIST_DIR/$APP_NAME.app"
 DMG_PATH="$DIST_DIR/$APP_NAME-$VERSION-$ARCH.dmg"
 ZIP_PATH="$DIST_DIR/$APP_NAME-$VERSION-$ARCH.zip"
+
+echo "▶ Running meaningful 100% coverage gate"
+"$ROOT/scripts/coverage.sh"
 
 echo "▶ Cleaning $DIST_DIR"
 rm -rf "$DIST_DIR"
@@ -75,6 +79,23 @@ if ! codesign -d -r- "$APP_DIR" 2>&1 | grep -q "certificate leaf"; then
     codesign -d -r- "$APP_DIR" 2>&1 | sed -n 's/^/   /p' >&2
     exit 1
 fi
+
+if [[ ! -f "$PINNED_CERT_LEAF_FILE" ]]; then
+    echo "❌ 서명 인증서 leaf 고정 파일이 없습니다: $PINNED_CERT_LEAF_FILE" >&2
+    exit 1
+fi
+EXPECTED_LEAF="$(tr '[:upper:]' '[:lower:]' < "$PINNED_CERT_LEAF_FILE" | tr -d '[:space:]')"
+ACTUAL_LEAF="$(codesign -d -r- "$APP_DIR" 2>&1 \
+    | sed -n 's/.*certificate leaf = H"\([0-9A-Fa-f]*\)".*/\1/p' \
+    | tr '[:upper:]' '[:lower:]')"
+if [[ ! "$EXPECTED_LEAF" =~ ^[0-9a-f]{40}$ ]] || [[ "$ACTUAL_LEAF" != "$EXPECTED_LEAF" ]]; then
+    echo "❌ 코드서명 인증서 leaf가 고정값과 다릅니다." >&2
+    echo "   expected: $EXPECTED_LEAF" >&2
+    echo "   actual:   ${ACTUAL_LEAF:-<missing>}" >&2
+    echo "   백업된 AutoLock 서명 .p12를 import한 뒤 다시 시도하세요." >&2
+    exit 1
+fi
+echo "✅ Pinned certificate leaf verified: $ACTUAL_LEAF"
 
 echo "▶ Building DMG"
 DMG_STAGE="$DIST_DIR/dmg-stage"

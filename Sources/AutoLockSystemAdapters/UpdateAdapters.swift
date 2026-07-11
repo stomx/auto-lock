@@ -23,14 +23,18 @@ private enum UpdateRepo {
 /// `feedURL` defaults to the real GitHub endpoint but is injectable so a
 /// staging/fork release — or a local fixture server in `diagnose update` — can
 /// be pointed at without code changes.
-struct GitHubUpdateClient: UpdateChecking {
+public struct GitHubUpdateClient: UpdateChecking {
     let feedURL: URL
 
-    init(feedURL: URL = UpdateRepo.latestReleaseAPI) {
+    public init() {
+        self.feedURL = UpdateRepo.latestReleaseAPI
+    }
+
+    public init(feedURL: URL) {
         self.feedURL = feedURL
     }
 
-    func latestRelease() async throws -> ReleaseInfo {
+    public func latestRelease() async throws -> ReleaseInfo {
         var request = URLRequest(url: feedURL)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("AutoLock", forHTTPHeaderField: "User-Agent")
@@ -57,8 +61,9 @@ struct GitHubUpdateClient: UpdateChecking {
 /// Downloads the release DMG to a temp file, verifying it against the
 /// published SHA256SUMS.txt when available. Used by the manual-install
 /// (DMG-open) fallback path.
-struct DownloadClient: UpdateDownloading {
-    func download(_ release: ReleaseInfo) async throws -> URL {
+public struct DownloadClient: UpdateDownloading {
+    public init() {}
+    public func download(_ release: ReleaseInfo) async throws -> URL {
         try await UpdateDownload.fetchAndVerify(
             from: release.dmgURL,
             fileName: release.dmgFileName,
@@ -143,8 +148,9 @@ enum UpdateDownload {
 /// Opens (mounts) the downloaded DMG via Finder so the user can drag the app to
 /// Applications. The manual-install fallback when self-update isn't possible.
 @MainActor
-struct SystemDMGOpener: DMGOpening {
-    func open(_ fileURL: URL) throws {
+public struct SystemDMGOpener: DMGOpening {
+    public init() {}
+    public func open(_ fileURL: URL) throws {
         guard NSWorkspace.shared.open(fileURL) else {
             throw UpdateError.openFailed(fileURL.lastPathComponent)
         }
@@ -156,20 +162,27 @@ struct SystemDMGOpener: DMGOpening {
 /// after this process exits, then quits. The decision logic (location verdict,
 /// helper script text) lives in `AutoLockCore`; this just performs the I/O.
 @MainActor
-struct SelfUpdateInstaller: SelfReplacing {
+public struct SelfUpdateInstaller: SelfReplacing {
     /// The installed bundle to replace. Injectable so `diagnose` can target a
     /// throwaway path; defaults to the running app.
     let bundleURL: URL
     /// When false (diagnose --dry-run), stop after writing the helper script
     /// and DON'T spawn it or terminate — so the swap can be inspected safely.
     let dryRun: Bool
+    private let verifier: StagedAppVerifying
 
-    init(bundleURL: URL = Bundle.main.bundleURL, dryRun: Bool = false) {
+    public init(
+        bundleURL: URL = Bundle.main.bundleURL,
+        verificationReferenceURL: URL = Bundle.main.bundleURL,
+        dryRun: Bool = false,
+        verifier: StagedAppVerifying? = nil
+    ) {
         self.bundleURL = bundleURL
         self.dryRun = dryRun
+        self.verifier = verifier ?? StagedAppVerifier(referenceAppURL: verificationReferenceURL)
     }
 
-    func canSelfUpdate(_ release: ReleaseInfo) -> Bool {
+    public func canSelfUpdate(_ release: ReleaseInfo) -> Bool {
         guard release.zipURL != nil else { return false }
         return InstallLocation.classify(
             bundlePath: bundleURL.path,
@@ -177,51 +190,48 @@ struct SelfUpdateInstaller: SelfReplacing {
         ) == .replaceable
     }
 
-    func installAndRelaunch(_ release: ReleaseInfo) async throws {
-        guard let zipURL = release.zipURL, let zipName = release.zipFileName else {
-            throw UpdateError.noZipAsset
-        }
-
-        // 1. Download + fail-closed verify (shared with the DMG path).
-        let zipFile = try await UpdateDownload.fetchAndVerify(
-            from: zipURL, fileName: zipName, checksumsURL: release.checksumsURL
-        )
-
-        // 2. Unpack into a staging dir on the SAME volume as the target so the
-        //    helper's replace is a same-filesystem op (avoids cross-device
-        //    surprises). We place it as a hidden sibling of the bundle.
-        let stagingDir = bundleURL.deletingLastPathComponent()
-            .appendingPathComponent(".AutoLockUpdate-\(release.tag)", isDirectory: true)
-        try? FileManager.default.removeItem(at: stagingDir)
-        try FileManager.default.createDirectory(at: stagingDir, withIntermediateDirectories: true)
-        try Self.run("/usr/bin/ditto", ["-x", "-k", zipFile.path, stagingDir.path])
-        try? FileManager.default.removeItem(at: zipFile)
-
-        // The unpacked .app (ditto --keepParent ZIP yields "AutoLock.app" inside).
-        guard let stagedApp = try FileManager.default
-            .contentsOfDirectory(at: stagingDir, includingPropertiesForKeys: nil)
-            .first(where: { $0.pathExtension == "app" }) else {
-            try? FileManager.default.removeItem(at: stagingDir)
-            throw UpdateError.unpackFailed("ZIP 안에서 .app을 찾지 못했습니다")
-        }
-
-        // 3. Build the detached swap script (pure AutoLockCore type).
-        let plan = SelfUpdatePlan(
+    public func installAndRelaunch(_ release: ReleaseInfo) async throws {
+        let coordinator = SelfUpdateCoordinator(operations: SelfUpdateOperations(
+            downloadArchive: { url, name, checksums in
+                try await UpdateDownload.fetchAndVerify(from: url, fileName: name, checksumsURL: checksums)
+            },
+            stageArchive: { archive, release, target in
+                try Self.stageArchive(archive, release: release, target: target)
+            },
+            verifyApp: { app, version in
+                try verifier.verify(stagedAppURL: app, expectedVersion: version)
+            },
+            writeHelper: { plan, directory in
+                let script = directory.appendingPathComponent("self-update.sh")
+                try SelfUpdateScript.text(for: plan).write(to: script, atomically: true, encoding: .utf8)
+                return script
+            },
+            spawnHelper: { script, arguments in
+                try Self.spawnDetached(script.path, arguments)
+            },
+            cleanup: { try? FileManager.default.removeItem(at: $0) },
+            terminateApp: { NSApp.terminate(nil) }
+        ))
+        try await coordinator.install(
+            release: release,
+            bundleURL: bundleURL,
             parentPID: ProcessInfo.processInfo.processIdentifier,
-            stagingAppPath: stagedApp.path,
-            targetAppPath: bundleURL.path
+            dryRun: dryRun
         )
-        let scriptURL = stagingDir.appendingPathComponent("self-update.sh")
-        try SelfUpdateScript.text(for: plan).write(to: scriptURL, atomically: true, encoding: .utf8)
+    }
 
-        if dryRun {
-            // diagnose --dry-run: leave staging + script for inspection, return.
-            return
+    private static func stageArchive(_ archive: URL, release: ReleaseInfo, target: URL) throws -> StagedUpdate {
+        let directory = target.deletingLastPathComponent()
+            .appendingPathComponent(".AutoLockUpdate-\(release.tag)", isDirectory: true)
+        try? FileManager.default.removeItem(at: directory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try run("/usr/bin/ditto", ["-x", "-k", archive.path, directory.path])
+        let app = directory.appendingPathComponent("AutoLock.app", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: app.path) else {
+            try? FileManager.default.removeItem(at: directory)
+            throw UpdateError.unpackFailed("ZIP 안에서 AutoLock.app을 찾지 못했습니다")
         }
-
-        // 4. Spawn the helper detached (survives our termination) and quit.
-        try Self.spawnDetached(scriptURL.path, plan.arguments)
-        NSApp.terminate(nil)
+        return StagedUpdate(directory: directory, app: app)
     }
 
     /// Run a tool to completion, throwing on non-zero exit.

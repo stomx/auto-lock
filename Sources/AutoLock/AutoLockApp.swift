@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import AutoLockKit
 import AutoLockCore
+import AutoLockSystemAdapters
 
 struct AutoLockApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -13,6 +14,10 @@ struct AutoLockApp: App {
     @StateObject private var updateController: UpdateController
 
     init() {
+        let keychainMigration = KeychainStore.migrateLegacyUnrestrictedItemIfNeeded()
+        if keychainMigration != .notNeeded {
+            AutoLockKit.Settings.shared.autoUnlock = false
+        }
         let scanner = BLEScanner()
         self.scanner = scanner
         _controller = StateObject(wrappedValue: ProximityController(

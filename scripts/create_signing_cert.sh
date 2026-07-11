@@ -19,6 +19,24 @@ set -euo pipefail
 CERT_NAME="${AUTOLOCK_SIGN_IDENTITY:-AutoLock Self-Signed}"
 OUT_DIR="${1:-$HOME/.autolock-signing}"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+PINNED_LEAF_FILE="$(cd "$(dirname "$0")" && pwd)/release-cert-leaf.txt"
+
+verify_pinned_leaf() {
+    if [ ! -f "$PINNED_LEAF_FILE" ]; then
+        echo "❌ 인증서 leaf 고정 파일이 없습니다: $PINNED_LEAF_FILE" >&2
+        return 1
+    fi
+    expected="$(tr '[:upper:]' '[:lower:]' < "$PINNED_LEAF_FILE" | tr -d '[:space:]')"
+    actual="$(security find-certificate -c "$CERT_NAME" -Z "$KEYCHAIN" 2>/dev/null \
+        | sed -n 's/^SHA-1 hash: //p' | head -n 1 | tr '[:upper:]' '[:lower:]')"
+    if [ "$actual" != "$expected" ]; then
+        echo "❌ '$CERT_NAME' 인증서 leaf가 릴리스 고정값과 다릅니다." >&2
+        echo "   expected: $expected" >&2
+        echo "   actual:   ${actual:-<missing>}" >&2
+        echo "   새 인증서를 사용하지 말고 백업된 AutoLock 서명 .p12를 import하세요." >&2
+        return 1
+    fi
+}
 
 mkdir -p "$OUT_DIR"
 KEY="$OUT_DIR/autolock-signing.key"
@@ -26,9 +44,18 @@ CRT="$OUT_DIR/autolock-signing.crt"
 P12="$OUT_DIR/autolock-signing.p12"
 
 if security find-identity -p codesigning | grep -q "$CERT_NAME"; then
+    verify_pinned_leaf
     echo "✅ 이미 '$CERT_NAME' 인증서가 keychain에 있습니다. (재생성하려면 먼저 제거)"
     security find-identity -p codesigning | grep "$CERT_NAME"
     exit 0
+fi
+
+if [ -f "$PINNED_LEAF_FILE" ] && [ "${AUTOLOCK_ALLOW_CERT_ROTATION:-0}" != "1" ]; then
+    echo "❌ 릴리스 인증서 leaf가 이미 고정되어 있어 새 인증서를 만들 수 없습니다." >&2
+    echo "   백업된 AutoLock 서명 .p12를 login keychain에 import하세요." >&2
+    echo "   의도적인 인증서 교체라면 AUTOLOCK_ALLOW_CERT_ROTATION=1로 실행한 뒤" >&2
+    echo "   release-cert-leaf.txt 변경을 별도로 검토해야 합니다." >&2
+    exit 1
 fi
 
 echo "▶ .p12 비밀번호를 입력하세요(백업용 — 잊지 마세요):"
@@ -58,6 +85,7 @@ security set-key-partition-list -S apple-tool:,apple:,codesign: \
 
 echo
 if security find-identity -p codesigning | grep -q "$CERT_NAME"; then
+    verify_pinned_leaf
     echo "✅ 완료. codesign 인증서 등록됨:"
     security find-identity -p codesigning | grep "$CERT_NAME"
     echo

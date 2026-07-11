@@ -23,7 +23,7 @@ import Foundation
         let result = UnlockKeystrokeSequencer.runTyping(
             characterCount: 4,
             isScreenLocked: { true },
-            emit: { emitted.append($0) }
+            emit: { emitted.append($0); return true }
         )
         #expect(emitted == [0, 1, 2, 3])
         #expect(result.typedCount == 4)
@@ -43,7 +43,7 @@ import Foundation
                 probeCount += 1
                 return probeCount <= 2   // locked for chars 0 and 1, then unlocked
             },
-            emit: { emitted.append($0) }
+            emit: { emitted.append($0); return true }
         )
         // Only the first two characters made it out; the rest are suppressed.
         #expect(emitted == [0, 1])
@@ -59,7 +59,7 @@ import Foundation
         let result = UnlockKeystrokeSequencer.runTyping(
             characterCount: 5,
             isScreenLocked: { false },
-            emit: { emitted.append($0) }
+            emit: { emitted.append($0); return true }
         )
         #expect(emitted.isEmpty)
         #expect(result.typedCount == 0)
@@ -74,7 +74,7 @@ import Foundation
         let result = UnlockKeystrokeSequencer.runTyping(
             characterCount: 3,
             isScreenLocked: { probeCount += 1; return true },
-            emit: { _ in }
+            emit: { _ in true }
         )
         #expect(probeCount == 3)
         #expect(result.completed == true)
@@ -89,11 +89,27 @@ import Foundation
         let result = UnlockKeystrokeSequencer.runTyping(
             characterCount: 0,
             isScreenLocked: { probeCount += 1; return true },
-            emit: { emitted.append($0) }
+            emit: { emitted.append($0); return true }
         )
         #expect(emitted.isEmpty)
         #expect(probeCount == 0)
         #expect(result.typedCount == 0)
         #expect(result.completed == true)
+    }
+
+    @Test func emissionFailureStopsImmediatelyAndReportsFailure() {
+        var emitted: [Int] = []
+        let result = UnlockKeystrokeSequencer.runTyping(
+            characterCount: 5,
+            isScreenLocked: { true },
+            emit: { index in
+                emitted.append(index)
+                return index != 1
+            }
+        )
+        #expect(emitted == [0, 1])
+        #expect(result.typedCount == 1)
+        #expect(result.stopReason == .emissionFailed)
+        #expect(result.completed == false)
     }
 }
