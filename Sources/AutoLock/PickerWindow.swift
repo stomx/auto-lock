@@ -11,6 +11,7 @@ import AutoLockKit
 @MainActor
 enum PickerWindow {
     private static var window: NSWindow?
+    private static weak var scanner: BLEScanner?
     private static let closeDelegate = WindowCloseDelegate { cleanup() }
 
     static func show(scanner: BLEScanner, settings: AutoLockKit.Settings) {
@@ -40,6 +41,8 @@ enum PickerWindow {
                 onClose: { close() }
             )
         )
+        self.scanner = scanner
+        scanner.startScanning(for: .deviceSelection)
         window = win
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -50,6 +53,8 @@ enum PickerWindow {
     }
 
     private static func cleanup() {
+        scanner?.stopScanning(for: .deviceSelection)
+        scanner = nil
         window = nil
     }
 }

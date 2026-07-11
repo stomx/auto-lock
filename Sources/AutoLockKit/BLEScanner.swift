@@ -18,11 +18,9 @@ public final class BLEScanner: NSObject, ObservableObject, ProximityScanning {
     private var central: CBCentralManager!
     private var smoother = RssiSmoother()
     private var pruneTimer: Timer?
-    /// Whether scanning has been requested (feature on / diagnostic asked).
-    /// Recorded even while Bluetooth is off so a later `.poweredOn` callback can
-    /// resume — but auto-resume only happens when this is true, so a toggled-off
-    /// AutoLock no longer silently restarts scanning. See `ScanPolicy`.
-    private var scanRequested = false
+    /// Scan requests are tracked per purpose so closing the device picker cannot
+    /// cancel proximity monitoring (and pairing can scan while monitoring is off).
+    private var scanDemand = ScanDemand()
 
     /// Supplies the current user grace period so pruning stays in sync with the
     /// proximity state machine. The pruner MUST evict later than the absence
@@ -38,12 +36,25 @@ public final class BLEScanner: NSObject, ObservableObject, ProximityScanning {
     }
 
     public func startScanning() {
+        startScanning(for: .proximityMonitoring)
+    }
+
+    public func startScanning(for purpose: ScanPurpose) {
         // Record the request even if Bluetooth isn't ready yet, so the
         // poweredOn callback can resume scanning later.
-        scanRequested = true
+        scanDemand.request(purpose)
+        ensureScanning()
+    }
+
+    private func ensureScanning() {
+        guard scanDemand.isRequested else { return }
         guard central.state == .poweredOn else { return }
-        if central.isScanning { central.stopScan() }
-        // Restart so options take effect (CoreBluetooth caches the first call's options).
+        // A second purpose may join an existing scan. Do not restart CoreBluetooth
+        // in that case; both clients consume the same discovery stream.
+        guard !central.isScanning else {
+            isScanning = true
+            return
+        }
         central.scanForPeripherals(
             withServices: nil,
             options: [
@@ -59,7 +70,13 @@ public final class BLEScanner: NSObject, ObservableObject, ProximityScanning {
     }
 
     public func stopScanning() {
-        scanRequested = false
+        stopScanning(for: .proximityMonitoring)
+    }
+
+    public func stopScanning(for purpose: ScanPurpose) {
+        scanDemand.cancel(purpose)
+        // Another client (for example the picker) still needs the shared scan.
+        guard !scanDemand.isRequested else { return }
         if central.isScanning { central.stopScan() }
         isScanning = false
         pruneTimer?.invalidate()
@@ -107,8 +124,8 @@ extension BLEScanner: @preconcurrency CBCentralManagerDelegate {
         // Only auto-resume if scanning was actually requested. Without this
         // gate a toggled-off AutoLock would silently restart scanning the
         // moment CoreBluetooth reports poweredOn.
-        if ScanPolicy.shouldScan(requested: scanRequested, poweredOn: central.state == .poweredOn) {
-            startScanning()
+        if ScanPolicy.shouldScan(requested: scanDemand.isRequested, poweredOn: central.state == .poweredOn) {
+            ensureScanning()
         } else {
             isScanning = false
         }
