@@ -9,6 +9,7 @@ import AutoLockSystemAdapters
 struct SystemScreenLocker: ScreenLocking {
     func lock() -> Bool { ScreenLocker.lock() }
     func isScreenLocked() -> Bool { ScreenLocker.isScreenLocked() }
+    func screenLockState() -> ScreenLockState { ScreenLocker.screenLockState() }
 }
 
 struct SystemDisplayWaker: DisplayWaking {

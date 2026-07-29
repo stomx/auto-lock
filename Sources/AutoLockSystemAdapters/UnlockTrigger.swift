@@ -75,7 +75,13 @@ public enum UnlockTrigger {
             // window, Spotlight…) — leaking the plaintext credential to the
             // wrong place. Only type while the screen is still genuinely locked.
             guard ScreenLocker.isScreenLocked() else {
-                AppLog.wake.error("screen unlocked before keystroke injection — aborting to avoid leaking password")
+                AppLog.record(
+                    .wake,
+                    level: .warning,
+                    code: "unlock_typing_cancelled_screen_already_open",
+                    outcome: .skipped,
+                    message: "키 입력 전 화면이 이미 열려 암호 입력을 안전하게 취소함"
+                )
                 return
             }
             // `postString` stops mid-word if the screen unlocks during typing
@@ -104,7 +110,13 @@ public enum UnlockTrigger {
     @discardableResult
     private static func postString(_ string: String) -> Bool {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
-            AppLog.wake.error("failed to create event source for password keystrokes")
+            AppLog.record(
+                .wake,
+                level: .error,
+                code: "unlock_event_source_unavailable",
+                outcome: .failure,
+                message: "암호 입력용 시스템 이벤트 소스를 만들 수 없음"
+            )
             return false
         }
         // CGEventKeyboardSetUnicodeString lets us avoid building a keycode map
@@ -125,7 +137,14 @@ public enum UnlockTrigger {
                     // Surface the failure instead of dropping a character silently —
                     // the auto-unlock will be incomplete and the user must fall back
                     // to manual auth.
-                    AppLog.wake.error("failed to create key event for password character")
+                    AppLog.record(
+                        .wake,
+                        level: .error,
+                        code: "unlock_character_event_creation_failed",
+                        outcome: .failure,
+                        message: "자동 해제 암호 문자 이벤트 생성 실패",
+                        metadata: ["character_index": String(index)]
+                    )
                     return false
                 }
                 utf16.withUnsafeBufferPointer { buf in
@@ -140,20 +159,42 @@ public enum UnlockTrigger {
             }
         )
         if !result.completed {
-            AppLog.wake.error("password typing stopped (\(String(describing: result.stopReason), privacy: .public)) after \(result.typedCount) keystrokes")
+            AppLog.record(
+                .wake,
+                level: .error,
+                code: "unlock_typing_incomplete",
+                outcome: .failure,
+                message: "자동 해제 암호 입력이 완료되기 전에 중단됨",
+                metadata: [
+                    "stop_reason": String(describing: result.stopReason),
+                    "typed_count": String(result.typedCount)
+                ]
+            )
         }
         return result.completed
     }
 
     private static func postReturnKey() {
         guard let source = CGEventSource(stateID: .hidSystemState) else {
-            AppLog.wake.error("failed to create event source for Return key")
+            AppLog.record(
+                .wake,
+                level: .error,
+                code: "unlock_return_event_source_unavailable",
+                outcome: .failure,
+                message: "자동 해제 Return 키 이벤트 소스를 만들 수 없음"
+            )
             return
         }
         // 36 == kVK_Return
         guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0x24, keyDown: true),
               let up = CGEvent(keyboardEventSource: source, virtualKey: 0x24, keyDown: false) else {
-            AppLog.wake.error("failed to create Return key event")
+            AppLog.record(
+                .wake,
+                level: .error,
+                code: "unlock_return_event_creation_failed",
+                outcome: .failure,
+                message: "자동 해제 Return 키 이벤트 생성 실패"
+            )
             return
         }
         down.post(tap: .cghidEventTap)

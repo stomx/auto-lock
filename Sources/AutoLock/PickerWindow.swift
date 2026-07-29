@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import AutoLockKit
+import AutoLockCore
 
 /// Standalone NSWindow for the device picker.
 ///
@@ -16,6 +17,12 @@ enum PickerWindow {
 
     static func show(scanner: BLEScanner, settings: AutoLockKit.Settings) {
         if let existing = window {
+            AppLog.record(
+                .ui,
+                code: "device_picker_focused",
+                outcome: .observed,
+                message: "이미 열린 디바이스 선택 화면을 다시 표시함"
+            )
             existing.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
@@ -43,6 +50,13 @@ enum PickerWindow {
         )
         self.scanner = scanner
         scanner.startScanning(for: .deviceSelection)
+        AppLog.record(
+            .ui,
+            code: "device_picker_opened",
+            outcome: .success,
+            message: "디바이스 선택 화면 열림",
+            metadata: ["configured_before_open": String(!settings.trackedDevices.isEmpty)]
+        )
         window = win
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -53,6 +67,12 @@ enum PickerWindow {
     }
 
     private static func cleanup() {
+        AppLog.record(
+            .ui,
+            code: "device_picker_closed",
+            outcome: .success,
+            message: "디바이스 선택 화면 닫힘"
+        )
         scanner?.stopScanning(for: .deviceSelection)
         scanner = nil
         window = nil

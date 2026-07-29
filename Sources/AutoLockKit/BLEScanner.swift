@@ -22,13 +22,16 @@ public final class BLEScanner: NSObject, ObservableObject, ProximityScanning {
     /// cancel proximity monitoring (and pairing can scan while monitoring is off).
     private var scanDemand = ScanDemand()
 
-    /// Supplies the current user grace period so pruning stays in sync with the
-    /// proximity state machine. The pruner MUST evict later than the absence
-    /// (instant-lock) point — see `LockTuning.pruneAfterSeconds` — otherwise the
-    /// stale/absence lock branches in `ProximityEvaluator` become unreachable.
-    /// `ProximityController` wires this to `Settings.gracePeriodSeconds`. When
-    /// unset we fall back to the maximum grace so we never prune too soon.
-    public var gracePeriodProvider: @MainActor () -> Int = { LockTuning.maxGracePeriodSeconds }
+    /// Supplies the current signal-loss tolerance and countdown so pruning stays
+    /// in sync with the proximity state machine. The pruner MUST evict later
+    /// than tolerance + countdown — see `LockTuning.pruneAfterSeconds`.
+    /// Safe maximum fallbacks ensure an unwired scanner never prunes too soon.
+    public var gracePeriodProvider: @MainActor () -> Int = {
+        LockSettingBounds.gracePeriodRange.upperBound
+    }
+    public var countdownPeriodProvider: @MainActor () -> Int = {
+        LockSettingBounds.countdownRange.upperBound
+    }
 
     public override init() {
         super.init()
@@ -42,7 +45,18 @@ public final class BLEScanner: NSObject, ObservableObject, ProximityScanning {
     public func startScanning(for purpose: ScanPurpose) {
         // Record the request even if Bluetooth isn't ready yet, so the
         // poweredOn callback can resume scanning later.
+        let wasRequested = scanDemand.isRequested
         scanDemand.request(purpose)
+        AppLog.record(
+            .bluetooth,
+            code: "scan_demand_added",
+            outcome: .observed,
+            message: "블루투스 스캔 요청이 추가됨",
+            metadata: [
+                "purpose": String(describing: purpose),
+                "shared_scan_already_requested": String(wasRequested)
+            ]
+        )
         ensureScanning()
     }
 
@@ -66,6 +80,13 @@ public final class BLEScanner: NSObject, ObservableObject, ProximityScanning {
             ]
         )
         isScanning = true
+        AppLog.record(
+            .bluetooth,
+            code: "ble_scan_started",
+            outcome: .success,
+            message: "CoreBluetooth 스캔 시작",
+            metadata: ["state": bluetoothState.logDescription]
+        )
         startPruneTimer()
     }
 
@@ -76,7 +97,16 @@ public final class BLEScanner: NSObject, ObservableObject, ProximityScanning {
     public func stopScanning(for purpose: ScanPurpose) {
         scanDemand.cancel(purpose)
         // Another client (for example the picker) still needs the shared scan.
-        guard !scanDemand.isRequested else { return }
+        guard !scanDemand.isRequested else {
+            AppLog.record(
+                .bluetooth,
+                code: "scan_demand_removed",
+                outcome: .skipped,
+                message: "다른 사용 목적이 남아 블루투스 스캔을 유지함",
+                metadata: ["purpose": String(describing: purpose)]
+            )
+            return
+        }
         if central.isScanning { central.stopScan() }
         isScanning = false
         pruneTimer?.invalidate()
@@ -84,17 +114,27 @@ public final class BLEScanner: NSObject, ObservableObject, ProximityScanning {
         // Drop discovered devices and their smoothing state. Pruning is paused
         // while stopped, so without this a long-disabled scanner would keep
         // stale `lastSeen` entries; on re-enable the first evaluate() could see
-        // an age past the absence point and lock instantly before any fresh
-        // advertisement arrives.
+        // an age past the configured lock point before any fresh advertisement
+        // arrives.
         devices = [:]
         smoother.prune(keeping: [])
+        AppLog.record(
+            .bluetooth,
+            code: "ble_scan_stopped",
+            outcome: .success,
+            message: "모든 요청이 해제되어 CoreBluetooth 스캔 중지",
+            metadata: ["purpose": String(describing: purpose)]
+        )
     }
 
-    /// Evict devices silent longer than the grace-derived prune threshold,
-    /// computed from the live grace period. The smoother is pruned in lockstep
-    /// so a rotated/departed device leaves no EWMA state behind.
+    /// Evict devices only after the live tolerance + countdown lock point.
+    /// The smoother is pruned in lockstep so a rotated/departed device leaves
+    /// no EWMA state behind.
     func clearStale() {
-        let threshold = LockTuning.pruneAfterSeconds(gracePeriodSeconds: gracePeriodProvider())
+        let threshold = LockTuning.pruneAfterSeconds(
+            gracePeriodSeconds: gracePeriodProvider(),
+            countdownSeconds: countdownPeriodProvider()
+        )
         let now = MonotonicClock.now()
         devices = devices.filter { now.timeIntervalSince($0.value.lastSeen) <= threshold }
         smoother.prune(keeping: Set(devices.keys))
@@ -121,6 +161,17 @@ extension BLEScanner: @preconcurrency CBCentralManagerDelegate {
         // boundary so the published value carries no CoreBluetooth type.
         bluetoothState = BluetoothPowerState(rawState: central.state.rawValue)
         stateResolved = true
+        AppLog.record(
+            .bluetooth,
+            level: bluetoothState.needsUserAction ? .warning : .info,
+            code: "bluetooth_state_changed",
+            outcome: bluetoothState == .poweredOn ? .success : .observed,
+            message: "블루투스 어댑터 상태 변경",
+            metadata: [
+                "state": bluetoothState.logDescription,
+                "scan_requested": String(scanDemand.isRequested)
+            ]
+        )
         // Only auto-resume if scanning was actually requested. Without this
         // gate a toggled-off AutoLock would silently restart scanning the
         // moment CoreBluetooth reports poweredOn.

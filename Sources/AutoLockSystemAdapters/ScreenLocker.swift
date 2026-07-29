@@ -15,26 +15,60 @@ public enum ScreenLocker {
             "/System/Library/PrivateFrameworks/login.framework/Versions/Current/login",
             RTLD_NOW
         ) else {
-            AppLog.system.error("dlopen(login.framework) failed: \(CStringSafe.string(from: dlerror(), fallback: "no error info"), privacy: .public)")
+            AppLog.record(
+                .system,
+                level: .error,
+                code: "screen_lock_framework_unavailable",
+                outcome: .failure,
+                message: "macOS login.framework를 열 수 없어 화면 잠금 불가",
+                metadata: [
+                    "detail": CStringSafe.string(from: dlerror(), fallback: "no_error_info"),
+                    "framework": "login.framework"
+                ]
+            )
             return false
         }
         defer { dlclose(handle) }
 
         guard let sym = dlsym(handle, "SACLockScreenImmediate") else {
-            AppLog.system.error("SACLockScreenImmediate symbol not found")
+            AppLog.record(
+                .system,
+                level: .error,
+                code: "screen_lock_symbol_unavailable",
+                outcome: .failure,
+                message: "즉시 잠금 시스템 함수를 찾을 수 없음",
+                metadata: ["symbol": "SACLockScreenImmediate"]
+            )
             return false
         }
         typealias SACLockFn = @convention(c) () -> Int32
         let fn = unsafeBitCast(sym, to: SACLockFn.self)
         let rc = fn()
         if rc != 0 {
-            AppLog.system.error("SACLockScreenImmediate returned \(rc, privacy: .public)")
+            AppLog.record(
+                .system,
+                level: .error,
+                code: "screen_lock_system_call_failed",
+                outcome: .failure,
+                message: "macOS 즉시 잠금 시스템 호출 실패",
+                metadata: ["return_code": String(rc)]
+            )
         }
         return rc == 0
     }
 
     public static func isScreenLocked() -> Bool {
-        guard let dict = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
-        return (dict["CGSSessionScreenIsLocked"] as? Bool) ?? false
+        screenLockState() == .locked
+    }
+
+    /// Unlike the compatibility Boolean above, this preserves an unavailable
+    /// CGSession probe as `.unknown` instead of misreporting it as unlocked.
+    public static func screenLockState() -> ScreenLockState {
+        guard let dict = CGSessionCopyCurrentDictionary() as? [String: Any] else {
+            return .unknown
+        }
+        // WindowServer omits CGSSessionScreenIsLocked while the active session
+        // is unlocked; it only adds the Boolean key for a locked session.
+        return (dict["CGSSessionScreenIsLocked"] as? Bool) == true ? .locked : .unlocked
     }
 }

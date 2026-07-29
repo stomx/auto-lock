@@ -18,7 +18,7 @@ if [ ! -d "$FW/Testing.framework" ]; then
     exit 1
 fi
 
-exec swift test \
+AUTOLOCK_DISABLE_PERSISTENT_LOGGING=1 exec swift test \
     -Xswiftc -F -Xswiftc "$FW" \
     -Xlinker -F -Xlinker "$FW" \
     -Xlinker -rpath -Xlinker "$FW" \

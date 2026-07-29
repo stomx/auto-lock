@@ -27,11 +27,27 @@ import AutoLockCore
         #expect(s.thresholdMagnitude == 40)
     }
 
-    /// 신호 끊김 허용은 더 이상 사용자 조정 항목이 아니라 15초 고정.
-    @Test func graceIsFixedAtFifteenSeconds() {
+    @Test func freshInstallUsesTenSecondToleranceAndFiveSecondCountdown() {
         let s = makeSettings()
-        #expect(s.gracePeriodSeconds == 15)
-        #expect(s.gracePeriodSeconds == LockTuning.fixedGracePeriodSeconds)
+        #expect(s.gracePeriodSeconds == 10)
+        #expect(s.countdownSeconds == 5)
+        #expect(s.gracePeriodSeconds == LockSettingBounds.defaultGracePeriodSeconds)
+        #expect(s.countdownSeconds == LockSettingBounds.defaultCountdownSeconds)
+    }
+
+    @Test func timingSettersClampAndPersist() {
+        let suite = "settings-timing-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let s = Settings(defaults: defaults)
+
+        s.gracePeriodSeconds = 3
+        s.countdownSeconds = 99
+        #expect(s.gracePeriodSeconds == 5)
+        #expect(s.countdownSeconds == 30)
+
+        let restored = Settings(defaults: defaults)
+        #expect(restored.gracePeriodSeconds == 5)
+        #expect(restored.countdownSeconds == 30)
     }
 
     /// 저장값이 없는 새 설치는 README 권장 -80dBm(magnitude 80)으로 시작한다.
@@ -44,6 +60,12 @@ import AutoLockCore
     @Test func inRangeValuesPassThrough() {
         let s = makeSettings()
         s.thresholdMagnitude = 75
+        #expect(s.thresholdMagnitude == 75)
+    }
+
+    @Test func thresholdSetterSnapsToFiveDBmStep() {
+        let s = makeSettings()
+        s.thresholdMagnitude = 73
         #expect(s.thresholdMagnitude == 75)
     }
 

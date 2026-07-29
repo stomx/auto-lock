@@ -13,7 +13,8 @@ import Foundation
                           rssi: Double,
                           threshold: Int = -70,
                           definitiveAway: Int = -80,
-                          grace: Int = 15,
+                          grace: Int = 10,
+                          countdown: Int = 5,
                           awaySince: Date? = nil) -> ProximitySnapshot {
         ProximitySnapshot(
             now: now,
@@ -21,25 +22,28 @@ import Foundation
             rssiThreshold: threshold,
             definitiveAwayThreshold: definitiveAway,
             gracePeriodSeconds: grace,
+            countdownSeconds: countdown,
             awaySince: awaySince
         )
     }
 
-    // #3: age past absence (15*2=30) → instant stale lock
-    @Test func staleInstantLock() {
-        let d = ProximityEvaluator.decide(snapshot(age: 31, rssi: -50))
+    // 마지막 신호 10초 + 카운트다운 5초가 지나면 총 15초에 잠근다.
+    @Test func staleCountdownExpiryLocksAtCombinedDeadline() {
+        let d = ProximityEvaluator.decide(snapshot(age: 15, rssi: -50))
         #expect(d.state == .away)
-        #expect(d.action == .lock(reason: .signalStaleSeconds(31)))
-        #expect(d.status == .instantLock(reason: .signalStaleSeconds(31)))
+        #expect(d.action == .lock(reason: .signalStaleSeconds(15)))
+        #expect(d.status == .locked(reason: .signalStaleSeconds(15)))
         #expect(d.awaySince == nil)
     }
 
-    // #4: age past grace (15) but before absence (30) → away countdown, stale reason
+    // 무신호 허용 10초 이후에는 마지막 광고 시각에 고정된 5초 카운트다운.
     @Test func staleCountdown() {
-        let d = ProximityEvaluator.decide(snapshot(age: 20, rssi: -50))
+        let d = ProximityEvaluator.decide(snapshot(age: 12, rssi: -50))
+        let lastSeen = now.addingTimeInterval(-12)
         #expect(d.state == .borderline)
-        #expect(d.status == .countdown(reason: .signalStaleSeconds(20), secondsLeft: 15))
-        #expect(d.awaySince == now)   // awaySince was nil → starts now
+        #expect(d.status == .countdown(reason: .signalStaleSeconds(12), secondsLeft: 3))
+        #expect(d.action == .showOverlay(until: now.addingTimeInterval(3)))
+        #expect(d.awaySince == lastSeen)
     }
 
     // #5: RSSI crashed below definitiveAway → instant crash lock
@@ -62,23 +66,35 @@ import Foundation
     @Test func signalWeakCountdown() {
         let d = ProximityEvaluator.decide(snapshot(age: 1, rssi: -75, threshold: -70, definitiveAway: -80))
         #expect(d.state == .borderline)
-        #expect(d.status == .countdown(reason: .signalWeak, secondsLeft: 15))
+        #expect(d.status == .countdown(reason: .signalWeak, secondsLeft: 5))
+        #expect(d.action == .showOverlay(until: now.addingTimeInterval(5)))
     }
 
-    // #8: no device visible → deviceUnseen away countdown
+    // 기기를 한 번도 보지 못한 경우에도 10초 허용 + 5초 카운트다운.
     @Test func deviceUnseen() {
         let s = ProximitySnapshot(now: now, best: nil, rssiThreshold: -70,
-                                  definitiveAwayThreshold: -80, gracePeriodSeconds: 15, awaySince: nil)
+                                  definitiveAwayThreshold: -80, gracePeriodSeconds: 10,
+                                  countdownSeconds: 5, awaySince: nil)
         let d = ProximityEvaluator.decide(s)
         #expect(d.state == .borderline)
         #expect(d.status == .countdown(reason: .deviceUnseen, secondsLeft: 15))
+        #expect(d.action == .hideOverlay)
         #expect(d.awaySince == now)
     }
 
-    // #9: away started long enough ago that grace has expired → lock
-    @Test func graceExpiredLocks() {
-        // awaySince 20s ago, grace 15 → remaining = -5 → lock
-        let started = now.addingTimeInterval(-20)
+    @Test func unseenShowsOverlayAfterTolerance() {
+        let started = now.addingTimeInterval(-10)
+        let s = ProximitySnapshot(now: now, best: nil, rssiThreshold: -70,
+                                  definitiveAwayThreshold: -80, gracePeriodSeconds: 10,
+                                  countdownSeconds: 5, awaySince: started)
+        let d = ProximityEvaluator.decide(s)
+        #expect(d.status == .countdown(reason: .deviceUnseen, secondsLeft: 5))
+        #expect(d.action == .showOverlay(until: now.addingTimeInterval(5)))
+    }
+
+    // 약신호 카운트다운은 무신호 허용과 무관하게 설정된 5초만 사용한다.
+    @Test func countdownExpiredLocks() {
+        let started = now.addingTimeInterval(-5)
         let d = ProximityEvaluator.decide(snapshot(age: 1, rssi: -75, threshold: -70, awaySince: started))
         #expect(d.state == .away)
         #expect(d.action == .lock(reason: .signalWeak))
@@ -86,20 +102,17 @@ import Foundation
         #expect(d.awaySince == nil)
     }
 
-    // #10: away within the final overlay window (≤5s) → showOverlay
-    @Test func overlayWindowShows() {
-        // awaySince 12s ago, grace 15 → remaining = 3 (≤5) → showOverlay until deadline
-        let started = now.addingTimeInterval(-12)
-        let d = ProximityEvaluator.decide(snapshot(age: 1, rssi: -75, threshold: -70, awaySince: started))
+    @Test func customCountdownDurationIsUsed() {
+        let started = now.addingTimeInterval(-2)
+        let d = ProximityEvaluator.decide(snapshot(
+            age: 1,
+            rssi: -75,
+            threshold: -70,
+            countdown: 8,
+            awaySince: started
+        ))
         #expect(d.state == .borderline)
-        #expect(d.action == .showOverlay(until: started.addingTimeInterval(15)))
-    }
-
-    // away outside the overlay window (>5s remaining) → hideOverlay
-    @Test func countdownOutsideOverlayWindowHides() {
-        // awaySince 3s ago, grace 15 → remaining = 12 (>5) → hideOverlay
-        let started = now.addingTimeInterval(-3)
-        let d = ProximityEvaluator.decide(snapshot(age: 1, rssi: -75, threshold: -70, awaySince: started))
-        #expect(d.action == .hideOverlay)
+        #expect(d.status == .countdown(reason: .signalWeak, secondsLeft: 6))
+        #expect(d.action == .showOverlay(until: started.addingTimeInterval(8)))
     }
 }

@@ -9,6 +9,7 @@ import AutoLockCore
 final class FakeScanner: ProximityScanning {
     var devices: [UUID: DiscoveredDevice] = [:]
     var gracePeriodProvider: @MainActor () -> Int = { 60 }
+    var countdownPeriodProvider: @MainActor () -> Int = { 30 }
     private(set) var startCount = 0
     private(set) var stopCount = 0
 
@@ -18,16 +19,27 @@ final class FakeScanner: ProximityScanning {
 
 final class SpyScreenLocker: ScreenLocking {
     var lockedState = false
+    var reportedState: ScreenLockState?
     /// When false, lock() reports failure and does NOT flip lockedState —
     /// simulating the private lock symbol being unavailable.
     var lockSucceeds = true
+    var changesStateOnLock = true
     private(set) var lockCount = 0
 
     func lock() -> Bool {
         lockCount += 1
-        if lockSucceeds { lockedState = true }
+        if lockSucceeds && changesStateOnLock { lockedState = true }
         return lockSucceeds
     }
+    func isScreenLocked() -> Bool { lockedState }
+    func screenLockState() -> ScreenLockState {
+        reportedState ?? (lockedState ? .locked : .unlocked)
+    }
+}
+
+final class DefaultStateScreenLocker: ScreenLocking {
+    var lockedState = false
+    func lock() -> Bool { true }
     func isScreenLocked() -> Bool { lockedState }
 }
 
@@ -46,13 +58,19 @@ final class SpyOverlay: OverlayPresenting {
 
 final class SpyWaker: DisplayWaking {
     private(set) var wakeCount = 0
-    func wake() -> Bool { wakeCount += 1; return true }
+    var succeeds = true
+    func wake() -> Bool { wakeCount += 1; return succeeds }
 }
 
 final class SpyUnlocker: UnlockTriggering {
     private(set) var attemptCount = 0
     var result: UnlockOutcome = .dispatched
-    func attempt() -> UnlockOutcome { attemptCount += 1; return result }
+    var onAttempt: (() -> Void)?
+    func attempt() -> UnlockOutcome {
+        attemptCount += 1
+        onAttempt?()
+        return result
+    }
 }
 
 // MARK: - 테스트
@@ -100,6 +118,13 @@ final class SpyUnlocker: UnlockTriggering {
         DiscoveredDevice(id: deviceID, name: "watch", smoothedRssi: rssi, lastSeen: now.addingTimeInterval(-ageSeconds))
     }
 
+    @Test func defaultScreenStateAdapterMapsBooleanProbe() {
+        let locker = DefaultStateScreenLocker()
+        #expect(locker.screenLockState() == .unlocked)
+        locker.lockedState = true
+        #expect(locker.screenLockState() == .locked)
+    }
+
     // 1. enabled=false → evaluate 시 overlay.hide + idle
     @Test func disabledHidesOverlayAndIdles() {
         let settings = makeSettings()
@@ -143,15 +168,14 @@ final class SpyUnlocker: UnlockTriggering {
         #expect(locker.lockCount == 0)
     }
 
-    // 4. age > absence point → 즉시 lock
-    //    grace 고정 15초 → absence point = 15*2 = 30초. age 31 > 30.
+    // 4. 기본 무신호 10초 + 카운트다운 5초가 끝난 age 15 → lock.
     @Test func staleAgeLocks() {
         let settings = makeSettings()
         settings.enabled = true
         settings.thresholdMagnitude = 70
         settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
         let scanner = FakeScanner()
-        scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 31)]
+        scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 15)]
         let locker = SpyScreenLocker()
         let c = makeController(settings: settings, scanner: scanner, locker: locker)
 
@@ -177,31 +201,21 @@ final class SpyUnlocker: UnlockTriggering {
         #expect(locker.lockCount == 1)
     }
 
-    // 6. grace 윈도우 final stretch → overlay.show(deadline)
-    //    grace 고정 15초, 오버레이 윈도우 마지막 5초.
-    @Test func overlayWindowShows() {
+    // 6. 약신호는 설정된 카운트다운 전체를 즉시 표시한다.
+    @Test func weakSignalShowsConfiguredCountdown() {
         let settings = makeSettings()
         settings.enabled = true
         settings.thresholdMagnitude = 70      // threshold -70
         settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
         let scanner = FakeScanner()
-        // 약신호(-75)로 away 카운트다운 진입. 첫 evaluate에서 awaySince=now가 잡힌다.
-        // remaining = 15 → hideOverlay. overlay 표시를 보려면 awaySince가 과거여야 하므로
-        // now를 11초 앞으로 옮겨 remaining=4 (≤5)로 만든다.
         scanner.devices = [deviceID: discovered(rssi: -75, ageSeconds: 1)]
         let overlay = SpyOverlay()
         let c = makeController(settings: settings, scanner: scanner, overlay: overlay)
 
-        // 첫 평가: awaySince = now 설정 (remaining 15 → hideOverlay)
-        c.evaluate()
-        // now를 11초 앞으로 옮겨 remaining=4 (≤5) → showOverlay
-        c.now = { [now] in now.addingTimeInterval(11) }
-        // lastSeen도 최신화해 stale 분기로 빠지지 않게 한다(age는 1s < grace15).
-        scanner.devices = [deviceID: DiscoveredDevice(id: deviceID, name: "watch", smoothedRssi: -75, lastSeen: now.addingTimeInterval(10))]
         c.evaluate()
 
         #expect(overlay.showCount >= 1)
-        #expect(overlay.lastDeadline != nil)
+        #expect(overlay.lastDeadline == now.addingTimeInterval(5))
     }
 
     // 7a. 화면 잠김+강신호+autoUnlock off → waker.wake
@@ -361,9 +375,9 @@ final class SpyUnlocker: UnlockTriggering {
         let settings = makeSettings()
         settings.enabled = true
         settings.thresholdMagnitude = 70
-        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))   // grace 고정 10 → absence 20
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
         let scanner = FakeScanner()
-        scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 31)]
+        scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 15)]
         let locker = SpyScreenLocker()
         locker.lockSucceeds = false
         let c = makeController(settings: settings, scanner: scanner, locker: locker)
@@ -381,9 +395,9 @@ final class SpyUnlocker: UnlockTriggering {
         let settings = makeSettings()
         settings.enabled = true
         settings.thresholdMagnitude = 70
-        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))   // grace 고정 10 → absence 20
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
         let scanner = FakeScanner()
-        scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 31)]
+        scanner.devices = [deviceID: discovered(rssi: -50, ageSeconds: 15)]
         let locker = SpyScreenLocker()
         locker.lockSucceeds = false
         let c = makeController(settings: settings, scanner: scanner, locker: locker)
@@ -401,7 +415,8 @@ final class SpyUnlocker: UnlockTriggering {
         let scanner = FakeScanner()
         let c = makeController(settings: settings, scanner: scanner)
         _ = c   // 구독 유지
-        #expect(scanner.gracePeriodProvider() == LockTuning.fixedGracePeriodSeconds)
+        #expect(scanner.gracePeriodProvider() == 10)
+        #expect(scanner.countdownPeriodProvider() == 5)
 
         // init 시점에 enabled=false를 1회 받아 stopScanning 호출됨.
         let baselineStop = scanner.stopCount
@@ -445,5 +460,238 @@ final class SpyUnlocker: UnlockTriggering {
         #expect(c.status == .watching)
         try await Task.sleep(for: .seconds(1.1))
         #expect(c.status == .awaitingDevice)
+    }
+
+    @Test func observesScreenStateEvenWhenMonitoringIsDisabled() {
+        let settings = makeSettings()
+        settings.enabled = false
+        let locker = SpyScreenLocker()
+        let c = makeController(settings: settings, locker: locker)
+
+        c.evaluate()
+        #expect(c.screenLockState == .unlocked)
+
+        locker.lockedState = true
+        c.evaluate()
+        #expect(c.screenLockState == .locked)
+
+        locker.reportedState = .unknown
+        c.evaluate()
+        #expect(c.screenLockState == .unknown)
+        #expect(c.recentEvents.contains {
+            $0.code == "screen_state_changed" && $0.level == .warning
+        })
+    }
+
+    @Test func manualLockConfirmsAndSkipsWhenAlreadyLocked() {
+        let settings = makeSettings()
+        let locker = SpyScreenLocker()
+        let c = makeController(settings: settings, locker: locker)
+
+        c.lockNow()
+        #expect(locker.lockCount == 1)
+        #expect(c.screenLockState == .locked)
+        if case .locked(reason: .userRequested) = c.status {} else {
+            Issue.record("expected confirmed manual lock, got \(c.status)")
+        }
+
+        c.lockNow()
+        #expect(locker.lockCount == 1)
+    }
+
+    @Test func acceptedLockWaitsForScreenConfirmationWithoutDuplicateRequest() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -95, ageSeconds: 1)]
+        let locker = SpyScreenLocker()
+        locker.changesStateOnLock = false
+        let c = makeController(settings: settings, scanner: scanner, locker: locker)
+
+        c.evaluate()
+        if case .lockRequested = c.status {} else {
+            Issue.record("expected pending lock, got \(c.status)")
+        }
+        c.lockNow()
+        #expect(locker.lockCount == 1)
+        c.now = { [now] in now.addingTimeInterval(1) }
+        c.evaluate()
+        #expect(locker.lockCount == 1)
+
+        locker.lockedState = true
+        c.now = { [now] in now.addingTimeInterval(2) }
+        c.evaluate()
+        #expect(c.screenLockState == .locked)
+        if case .locked = c.status {} else {
+            Issue.record("expected confirmed lock, got \(c.status)")
+        }
+    }
+
+    @Test func acceptedButUnconfirmedLockTimesOutAsFailure() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -95, ageSeconds: 1)]
+        let locker = SpyScreenLocker()
+        locker.changesStateOnLock = false
+        let c = makeController(settings: settings, scanner: scanner, locker: locker)
+
+        c.evaluate()
+        c.now = { [now] in now.addingTimeInterval(6) }
+        c.evaluate()
+
+        if case .lockFailed = c.status {} else {
+            Issue.record("expected confirmation timeout failure, got \(c.status)")
+        }
+        #expect(locker.lockCount == 1)
+        #expect(c.recentEvents.contains { $0.code == "screen_lock_confirmation_timeout" })
+    }
+
+    @Test func dispatchedUnlockIsConfirmedByObservedScreenOpening() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.wakeOnProximity = true
+        settings.autoUnlock = true
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -40, ageSeconds: 1)]
+        let locker = SpyScreenLocker()
+        locker.lockedState = true
+        let unlocker = SpyUnlocker()
+        unlocker.result = .dispatched
+        let c = makeController(settings: settings, scanner: scanner, locker: locker, unlocker: unlocker)
+
+        c.evaluate()
+        locker.lockedState = false
+        c.now = { [now] in now.addingTimeInterval(1) }
+        c.evaluate()
+
+        #expect(c.screenLockState == .unlocked)
+        #expect(c.recentEvents.contains { $0.code == "screen_unlock_confirmed" })
+    }
+
+    @Test func dispatchedUnlockTimeoutRecordsFailure() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.wakeOnProximity = true
+        settings.autoUnlock = true
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -40, ageSeconds: 1)]
+        let locker = SpyScreenLocker()
+        locker.lockedState = true
+        let unlocker = SpyUnlocker()
+        unlocker.result = .dispatched
+        let c = makeController(settings: settings, scanner: scanner, locker: locker, unlocker: unlocker)
+
+        c.evaluate()
+        c.now = { [now] in now.addingTimeInterval(6) }
+        c.evaluate()
+
+        #expect(c.recentEvents.contains { $0.code == "screen_unlock_confirmation_timeout" })
+    }
+
+    @Test func immediatelyUnlockedOutcomeIsVerified() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.wakeOnProximity = true
+        settings.autoUnlock = true
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -40, ageSeconds: 1)]
+        let locker = SpyScreenLocker()
+        locker.lockedState = true
+        let unlocker = SpyUnlocker()
+        unlocker.result = .unlocked
+        unlocker.onAttempt = { locker.lockedState = false }
+        let c = makeController(settings: settings, scanner: scanner, locker: locker, unlocker: unlocker)
+
+        c.evaluate()
+
+        #expect(c.screenLockState == .unlocked)
+        #expect(c.recentEvents.contains { $0.code == "screen_unlock_confirmed" })
+    }
+
+    @Test func wakeFailuresAndUnlockPreflightReasonsAreSurfaced() {
+        for outcome in [UnlockOutcome.noAccessibility, .eventSourceUnavailable] {
+            let settings = makeSettings()
+            settings.enabled = true
+            settings.thresholdMagnitude = 70
+            settings.wakeOnProximity = true
+            settings.autoUnlock = true
+            settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+            let scanner = FakeScanner()
+            scanner.devices = [deviceID: discovered(rssi: -40, ageSeconds: 1)]
+            let locker = SpyScreenLocker()
+            locker.lockedState = true
+            let unlocker = SpyUnlocker()
+            unlocker.result = outcome
+            let waker = SpyWaker()
+            waker.succeeds = false
+            let c = makeController(
+                settings: settings,
+                scanner: scanner,
+                locker: locker,
+                waker: waker,
+                unlocker: unlocker
+            )
+
+            c.evaluate()
+            #expect(c.recentEvents.contains {
+                $0.code == "fallback_display_wake" && $0.outcome == .failure
+            })
+        }
+
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.wakeOnProximity = true
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -40, ageSeconds: 1)]
+        let locker = SpyScreenLocker()
+        locker.lockedState = true
+        let waker = SpyWaker()
+        waker.succeeds = false
+        let c = makeController(settings: settings, scanner: scanner, locker: locker, waker: waker)
+        c.evaluate()
+        #expect(c.recentEvents.contains {
+            $0.code == "display_wake_requested" && $0.outcome == .failure
+        })
+    }
+
+    @Test func countdownExpiryLogsNonInstantLockDecision() {
+        let settings = makeSettings()
+        settings.enabled = true
+        settings.thresholdMagnitude = 70
+        settings.addDevice(TrackedDevice(id: deviceID, name: "watch"))
+        let scanner = FakeScanner()
+        scanner.devices = [deviceID: discovered(rssi: -75, ageSeconds: 1)]
+        let locker = SpyScreenLocker()
+        let c = makeController(settings: settings, scanner: scanner, locker: locker)
+
+        c.evaluate()
+        c.now = { [now] in now.addingTimeInterval(5) }
+        scanner.devices = [
+            deviceID: DiscoveredDevice(
+                id: deviceID,
+                name: "watch",
+                smoothedRssi: -75,
+                lastSeen: now.addingTimeInterval(4)
+            )
+        ]
+        c.evaluate()
+
+        #expect(locker.lockCount == 1)
+        #expect(c.recentEvents.contains {
+            $0.code == "proximity_state_changed" && $0.message.contains("잠금 유예가 끝나")
+        })
     }
 }

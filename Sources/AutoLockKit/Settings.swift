@@ -29,7 +29,7 @@ public final class Settings: ObservableObject {
         didSet { defaults.set(autoUnlock, forKey: Keys.autoUnlock) }
     }
     /// Slider exposes the magnitude (positive); the actual RSSI threshold is the negation.
-    /// Range: 40~100 in 10-step increments.
+    /// Range: 40~100 in 5-step increments.
     ///
     /// Backed by a private `@Published` so the *only* value ever stored or
     /// published is already clamped — a computed `didSet`-clamp would transiently
@@ -45,11 +45,30 @@ public final class Settings: ObservableObject {
             defaults.set(clamped, forKey: Keys.thresholdMagnitude)
         }
     }
-    /// Advertising-silence tolerance before the away countdown starts. No longer
-    /// user-tunable — fixed at `LockTuning.fixedGracePeriodSeconds` (15s). Kept
-    /// as a property so the rest of the plumbing (ProximityController, the BLE
-    /// pruner) reads it unchanged, but it is read-only and not persisted.
-    public var gracePeriodSeconds: Int { LockTuning.fixedGracePeriodSeconds }
+
+    /// Advertising-silence tolerance before the lock countdown starts.
+    private var _gracePeriodSeconds: Int
+    public var gracePeriodSeconds: Int {
+        get { _gracePeriodSeconds }
+        set {
+            let clamped = LockSettingBounds.clampGracePeriodSeconds(newValue)
+            objectWillChange.send()
+            _gracePeriodSeconds = clamped
+            defaults.set(clamped, forKey: Keys.signalLossToleranceSeconds)
+        }
+    }
+
+    /// Visible countdown duration after an away condition is confirmed.
+    private var _countdownSeconds: Int
+    public var countdownSeconds: Int {
+        get { _countdownSeconds }
+        set {
+            let clamped = LockSettingBounds.clampCountdownSeconds(newValue)
+            objectWillChange.send()
+            _countdownSeconds = clamped
+            defaults.set(clamped, forKey: Keys.countdownSeconds)
+        }
+    }
 
     public var rssiThreshold: Int { -thresholdMagnitude }
     public var definitiveAwayThreshold: Int { rssiThreshold - LockTuning.definitiveAwayMarginDBm }
@@ -60,6 +79,10 @@ public final class Settings: ObservableObject {
         static let wakeOnProximity = "wakeOnProximity"
         static let autoUnlock = "autoUnlock"
         static let thresholdMagnitude = "thresholdMagnitude"
+        // New keys intentionally avoid reviving stale values from the old,
+        // removed `gracePeriodSeconds` slider.
+        static let signalLossToleranceSeconds = "signalLossToleranceSeconds"
+        static let countdownSeconds = "countdownSeconds"
     }
 
     public init(defaults: UserDefaults = .standard) {
@@ -76,6 +99,12 @@ public final class Settings: ObservableObject {
         let storedMag = defaults.object(forKey: Keys.thresholdMagnitude) as? Int
             ?? LockSettingBounds.defaultThresholdMagnitude
         self._thresholdMagnitude = LockSettingBounds.clampThresholdMagnitude(storedMag)
+        let storedGrace = defaults.object(forKey: Keys.signalLossToleranceSeconds) as? Int
+            ?? LockSettingBounds.defaultGracePeriodSeconds
+        self._gracePeriodSeconds = LockSettingBounds.clampGracePeriodSeconds(storedGrace)
+        let storedCountdown = defaults.object(forKey: Keys.countdownSeconds) as? Int
+            ?? LockSettingBounds.defaultCountdownSeconds
+        self._countdownSeconds = LockSettingBounds.clampCountdownSeconds(storedCountdown)
     }
 
     /// Only one device is supported at a time. Replacing keeps the UI simple

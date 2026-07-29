@@ -15,7 +15,8 @@ if [ ! -f "$JSON" ]; then
 fi
 
 SCOPE='select(.filename |
-    contains("/Sources/AutoLockCore/") or
+    (contains("/Sources/AutoLockCore/") and
+        ((endswith("/AppLog.swift") or endswith("/SQLiteDiagnosticStore.swift")) | not)) or
     (contains("/Sources/AutoLockKit/") and (endswith("/BLEScanner.swift") | not)) or
     endswith("/Sources/AutoLockSystemAdapters/StagedAppVerifier.swift") or
     endswith("/Sources/AutoLockSystemAdapters/SelfUpdateCoordinator.swift")

@@ -6,8 +6,9 @@ single executable line is missed.
 
 ## Included at 100%
 
-- `Sources/AutoLockCore/**`: proximity, wake, version, update, Keychain ACL,
-  typing and rollback decisions.
+- `Sources/AutoLockCore/**` except `AppLog.swift` and
+  `SQLiteDiagnosticStore.swift`: proximity, wake, version, update, Keychain
+  ACL, typing and rollback decisions.
 - `Sources/AutoLockKit/**` except `BLEScanner.swift`: controller state changes,
   settings persistence, release parsing, checksum parsing and update flow.
 - `Sources/AutoLockSystemAdapters/StagedAppVerifier.swift`: staged bundle ID,
@@ -21,6 +22,10 @@ they do not exist merely to execute lines.
 ## Deliberately outside the percentage
 
 - `Sources/AutoLock/**`: SwiftUI/AppKit composition and visual rendering.
+- `AppLog.swift` / `SQLiteDiagnosticStore.swift`: Unified Logging and native
+  SQLite persistence/migration boundary. The SQLite behavior has dedicated
+  temporary-database integration tests but is excluded from the deterministic
+  line-percentage contract because error branches depend on native SQLite I/O.
 - `BLEScanner.swift`: CoreBluetooth delegate bridge.
 - `KeychainStore.swift`, `ScreenLocker.swift`, `WakeController.swift`,
   `UnlockTrigger.swift`, the native I/O inside `UpdateAdapters.swift`, and

@@ -29,6 +29,8 @@ enum Diagnostics {
             runOverlay(rest)
         case "lock-status":
             runLockStatus()
+        case "logging":
+            runLogging()
         case "lock":
             runLock(rest)
         case "update":
@@ -59,6 +61,7 @@ enum Diagnostics {
           wake           디스플레이 깨우기 호출                            [비파괴]
           overlay [초]   화면 중앙 카운트다운 오버레이 표시 (기본 5초)     [비파괴]
           lock-status    현재 화면 잠금 상태 출력                          [비파괴]
+          logging        구조화 로그 기록·영구 저장 경로 자체 점검           [비파괴]
           lock [--yes]   화면을 즉시 잠금 (--yes 필수)                     [⚠️ 파괴적]
           update [옵션]  업데이트 파이프라인 E2E 점검 (조회→비교→다운로드→검증)  [비파괴]
                          --current <버전>  현재 버전을 가장해 "가능" 경로 강제 (예: 0.0.1)
@@ -76,6 +79,7 @@ enum Diagnostics {
           .build/release/AutoLock diagnose wake
           .build/release/AutoLock diagnose overlay 5
           .build/release/AutoLock diagnose lock-status
+          .build/release/AutoLock diagnose logging
           .build/release/AutoLock diagnose lock --yes
         """)
     }
@@ -185,12 +189,40 @@ enum Diagnostics {
     // MARK: - lock-status (비파괴)
 
     private static func runLockStatus() {
-        let locked = ScreenLocker.isScreenLocked()
-        if locked {
+        switch ScreenLocker.screenLockState() {
+        case .locked:
             print("🔒 현재 화면이 잠겨 있습니다. (isScreenLocked = true)")
-        } else {
+        case .unlocked:
             print("🔓 현재 화면이 잠겨 있지 않습니다. (isScreenLocked = false)")
+        case .unknown:
+            print("⚠️ macOS 세션에서 현재 화면 잠금 상태를 확인할 수 없습니다.")
+            exit(1)
         }
+        exit(0)
+    }
+
+    // MARK: - logging (비파괴)
+
+    private static func runLogging() {
+        let event = AppLog.record(
+            .system,
+            code: "diagnostic_log_probe",
+            outcome: .success,
+            message: "구조화 진단 로그 자체 점검"
+        )
+        let database = AppLog.logDatabaseURL
+        guard AppLog.isPersistentStoreAvailable,
+              AppLog.containsPersistedEvent(id: event.id) else {
+            print("❌ 통합 로그는 호출했지만 SQLite 영구 저장을 확인하지 못했습니다.")
+            print("   DB: \(database.path)")
+            if let failure = AppLog.persistentStoreFailure {
+                print("   원인: \(failure)")
+            }
+            exit(1)
+        }
+        print("✅ 구조화 로그와 SQLite 영구 저장이 정상입니다.")
+        print("   세션: \(event.sessionID)")
+        print("   DB: \(database.path)")
         exit(0)
     }
 

@@ -1,40 +1,188 @@
 import Foundation
 import os
 
-/// 통합 로깅(Unified Logging) 진입점. 기존 `NSLog`를 대체한다.
-///
-/// `NSLog`는 릴리스 빌드/GUI 앱에서 `log show`·Console 에 신뢰성 있게 실리지
-/// 않는다(특히 자식 stderr 가 통합 로깅으로 흐르지 않는 환경). 그래서
-/// "자동 잠금/해제가 왜 발화하지 않았는가"를 사후에 추적할 수 없었다.
-/// `os.Logger` 는 subsystem/category 가 붙은 채 항상 통합 로깅에 기록되므로
-/// 아래처럼 카테고리별로 필터링해 읽을 수 있다:
-///
-///   log show --last 30m --predicate 'subsystem == "com.local.autolock"' --info
-///   log stream         --predicate 'subsystem == "com.local.autolock"' --level info
-///
-/// `os` 는 모든 Apple 플랫폼이 제공하는 시스템 모듈이라 AutoLockCore 의
-/// "Foundation only(외부 의존 없음)" 원칙을 깨지 않는다. 도메인 순수 결정
-/// 함수들은 여전히 로깅하지 않으며, 부수효과를 내는 컨트롤러/어댑터만 쓴다.
-///
-/// 저장용량 정책 — 레벨을 의도적으로 가른다:
-///  - 정상 동작(발화/스킵/잠금 성공)은 `.info`. 통합 로깅에서 .info 는 평소
-///    디스크에 영구 저장되지 않고 메모리 버퍼에만 머문다. 그래서 상시 운영
-///    중에는 저장용량을 사실상 차지하지 않으면서도, 문제를 추적할 땐
-///    `log stream`(실시간) 또는 `log show --info`(최근 버퍼)로 끌어낼 수 있다.
-///  - 실패(이벤트소스 없음, 잠금 호출 실패 등)만 `.error`. 디스크에 보존돼
-///    사후에 `log show`(--info 없이도)로 바로 보인다. 실패는 드물어 누적량이
-///    미미하다.
-/// 통합 로깅 자체의 총량 상한·롤링은 macOS 가 관리하므로 앱이 디스크를 무한
-/// 점유할 수 없다.
-public enum AppLog {
-    /// 모든 카테고리가 공유하는 subsystem. 번들 ID 와 일치시켜 Console 에서
-    /// 프로세스 단위로 묶어 보기 좋게 한다.
-    public static let subsystem = "com.local.autolock"
+public enum DiagnosticCategory: String, Codable, CaseIterable {
+    case lifecycle
+    case settings
+    case bluetooth
+    case proximity
+    case screen
+    case wake
+    case system
+    case ui
+}
 
-    /// 근접 상태머신(평가/잠금 발화). `ProximityController` 가 쓴다.
-    public static let proximity = Logger(subsystem: subsystem, category: "proximity")
-    /// 화면 깨우기 / 자동 잠금 해제 발화 경로.
-    public static let wake = Logger(subsystem: subsystem, category: "wake")
-    /// 화면 잠금 실행(ScreenLocker) 및 권한/키체인 등 시스템 호출.
-    public static let system = Logger(subsystem: subsystem, category: "system")
+public enum DiagnosticLevel: String, Codable {
+    case info
+    case warning
+    case error
+}
+
+public enum DiagnosticOutcome: String, Codable {
+    case observed
+    case pending
+    case success
+    case skipped
+    case failure
+}
+
+/// One stable, machine-readable diagnostic record.
+///
+/// `code` and `correlationID` are deliberately separate from the Korean
+/// presentation text. Support can group a request and its later confirmation
+/// without parsing localized strings, while the menu can still show `message`.
+public struct DiagnosticEvent: Codable, Equatable, Identifiable {
+    public let id: UUID
+    public let timestamp: Date
+    public let sessionID: String
+    public let category: DiagnosticCategory
+    public let level: DiagnosticLevel
+    public let code: String
+    public let outcome: DiagnosticOutcome
+    public let correlationID: String?
+    public let message: String
+    public let metadata: [String: String]
+
+    public init(
+        id: UUID = UUID(),
+        timestamp: Date = Date(),
+        sessionID: String,
+        category: DiagnosticCategory,
+        level: DiagnosticLevel,
+        code: String,
+        outcome: DiagnosticOutcome,
+        correlationID: String? = nil,
+        message: String,
+        metadata: [String: String] = [:]
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.sessionID = sessionID
+        self.category = category
+        self.level = level
+        self.code = code
+        self.outcome = outcome
+        self.correlationID = correlationID
+        self.message = message
+        self.metadata = metadata
+    }
+
+    /// Compact form used by Unified Logging and copied support diagnostics.
+    public var line: String {
+        var fields = [
+            "session=\(sessionID)",
+            "category=\(category.rawValue)",
+            "event=\(code)",
+            "outcome=\(outcome.rawValue)"
+        ]
+        if let correlationID {
+            fields.append("correlation=\(correlationID)")
+        }
+        for (key, value) in metadata.sorted(by: { $0.key < $1.key }) {
+            fields.append("\(key)=\(value)")
+        }
+        fields.append("message=\"\(Self.singleLine(message))\"")
+        return fields.joined(separator: " ")
+    }
+
+    private static func singleLine(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\"", with: "'")
+    }
+}
+
+/// Unified Logging + durable SQLite diagnostics.
+///
+/// The unified log is convenient for live inspection, but `.info` records are
+/// not guaranteed to remain on disk. Operational state transitions therefore
+/// also go to `~/Library/Application Support/AutoLock/diagnostics.sqlite3`.
+/// The database lives outside the replaceable `.app` bundle, so application
+/// updates preserve it. Retention is bounded by age and row count. Callers must
+/// only put non-secret values in metadata; passwords and full device identifiers
+/// are intentionally never accepted implicitly.
+public enum AppLog {
+    public static let subsystem = "com.local.autolock"
+    public static let sessionID = String(UUID().uuidString.prefix(8)).lowercased()
+
+    public static let lifecycle = Logger(subsystem: subsystem, category: DiagnosticCategory.lifecycle.rawValue)
+    public static let settings = Logger(subsystem: subsystem, category: DiagnosticCategory.settings.rawValue)
+    public static let bluetooth = Logger(subsystem: subsystem, category: DiagnosticCategory.bluetooth.rawValue)
+    public static let proximity = Logger(subsystem: subsystem, category: DiagnosticCategory.proximity.rawValue)
+    public static let screen = Logger(subsystem: subsystem, category: DiagnosticCategory.screen.rawValue)
+    public static let wake = Logger(subsystem: subsystem, category: DiagnosticCategory.wake.rawValue)
+    public static let system = Logger(subsystem: subsystem, category: DiagnosticCategory.system.rawValue)
+    public static let ui = Logger(subsystem: subsystem, category: DiagnosticCategory.ui.rawValue)
+
+    private static let sink = DiagnosticLogSink()
+
+    @discardableResult
+    public static func record(
+        _ category: DiagnosticCategory,
+        level: DiagnosticLevel = .info,
+        code: String,
+        outcome: DiagnosticOutcome,
+        correlationID: String? = nil,
+        message: String,
+        metadata: [String: String] = [:]
+    ) -> DiagnosticEvent {
+        let event = DiagnosticEvent(
+            sessionID: sessionID,
+            category: category,
+            level: level,
+            code: code,
+            outcome: outcome,
+            correlationID: correlationID,
+            message: message,
+            metadata: metadata
+        )
+
+        let logger = logger(for: category)
+        switch level {
+        case .info:
+            logger.info("\(event.line, privacy: .public)")
+        case .warning:
+            logger.warning("\(event.line, privacy: .public)")
+        case .error:
+            logger.error("\(event.line, privacy: .public)")
+        }
+        sink.append(event)
+        return event
+    }
+
+    /// Persisted records across app sessions, newest first. If SQLite is
+    /// unavailable, this falls back to the current process's in-memory records.
+    public static func recentEvents(limit: Int = 20) -> [DiagnosticEvent] {
+        sink.recent(limit: max(0, limit))
+    }
+
+    public static var logDatabaseURL: URL {
+        sink.databaseURL
+    }
+
+    public static var isPersistentStoreAvailable: Bool {
+        sink.isPersistentStoreAvailable
+    }
+
+    public static var persistentStoreFailure: String? {
+        sink.persistentStoreFailure
+    }
+
+    public static func containsPersistedEvent(id: UUID) -> Bool {
+        sink.containsPersistedEvent(id: id)
+    }
+
+    private static func logger(for category: DiagnosticCategory) -> Logger {
+        switch category {
+        case .lifecycle: return lifecycle
+        case .settings: return settings
+        case .bluetooth: return bluetooth
+        case .proximity: return proximity
+        case .screen: return screen
+        case .wake: return wake
+        case .system: return system
+        case .ui: return ui
+        }
+    }
 }

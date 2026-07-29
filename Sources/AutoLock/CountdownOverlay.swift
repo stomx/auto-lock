@@ -3,7 +3,8 @@ import SwiftUI
 import AutoLockCore
 
 /// Big translucent countdown displayed in the middle of the screen during the
-/// grace period. The window ignores mouse events so it never gets in the way
+/// configured countdown period. The window ignores mouse events so it never
+/// gets in the way.
 /// of whatever the user is doing — they can keep typing or click through it.
 @MainActor
 final class CountdownOverlay {

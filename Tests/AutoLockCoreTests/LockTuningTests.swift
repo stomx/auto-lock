@@ -4,40 +4,42 @@ import Foundation
 
 @Suite struct LockTuningTests {
 
-    // #1: grace=15 → 15*2 + 2 = 32
-    @Test func pruneAfterSecondsMinGrace() {
-        #expect(LockTuning.pruneAfterSeconds(gracePeriodSeconds: 15) == 32.0)
+    // 기본 10초 무신호 + 5초 카운트다운 + 2초 프루닝 여유 = 17초.
+    @Test func pruneAfterDefaultTiming() {
+        #expect(LockTuning.pruneAfterSeconds(
+            gracePeriodSeconds: 10,
+            countdownSeconds: 5
+        ) == 17.0)
     }
 
-    // #2: grace=60 → 60*2 + 2 = 122
-    @Test func pruneAfterSecondsMaxGrace() {
-        #expect(LockTuning.pruneAfterSeconds(gracePeriodSeconds: 60) == 122.0)
+    @Test func signalLossLockPointAddsToleranceAndCountdown() {
+        #expect(LockTuning.signalLossLockPointSeconds(
+            gracePeriodSeconds: 10,
+            countdownSeconds: 5
+        ) == 15.0)
     }
 
-    // 신호 끊김 허용은 더 이상 사용자 조정 항목이 아니라 15초 고정.
-    @Test func fixedGraceIsFifteenSeconds() {
-        #expect(LockTuning.fixedGracePeriodSeconds == 15)
-    }
-
-    // 고정 grace에서도 reachability 불변식이 성립해야 한다(pruner가 absence 이후 evict).
-    @Test func fixedGracePruneOutlivesAbsence() {
-        let grace = LockTuning.fixedGracePeriodSeconds
-        let absence = Double(grace) * LockTuning.absenceMultiplier
-        let prune = LockTuning.pruneAfterSeconds(gracePeriodSeconds: grace)
-        #expect(prune > absence)
-    }
-
-    // #11: Reachability proof — the pruner must evict LATER than the absence
-    // (instant-lock) point across the historical grace span, otherwise the
-    // stale/absence branches in ProximityEvaluator are dead code.
-    @Test func pruneAlwaysOutlivesAbsencePoint() {
-        for grace in 10...60 {
-            let absence = Double(grace) * LockTuning.absenceMultiplier
-            let prune = LockTuning.pruneAfterSeconds(gracePeriodSeconds: grace)
-            #expect(
-                prune > absence,
-                "prune(\(prune)) must exceed absence(\(absence)) at grace=\(grace) so the device survives until the instant-lock decision"
-            )
+    // 프루너는 모든 허용 설정 조합에서 실제 잠금 시점보다 늦게 동작해야 한다.
+    @Test func pruneAlwaysOutlivesSignalLossLockPoint() {
+        for grace in stride(
+            from: LockSettingBounds.gracePeriodRange.lowerBound,
+            through: LockSettingBounds.gracePeriodRange.upperBound,
+            by: LockSettingBounds.gracePeriodStep
+        ) {
+            for countdown in LockSettingBounds.countdownRange {
+                let lockPoint = LockTuning.signalLossLockPointSeconds(
+                    gracePeriodSeconds: grace,
+                    countdownSeconds: countdown
+                )
+                let prune = LockTuning.pruneAfterSeconds(
+                    gracePeriodSeconds: grace,
+                    countdownSeconds: countdown
+                )
+                #expect(
+                    prune > lockPoint,
+                    "prune(\(prune)) must exceed lockPoint(\(lockPoint)) at grace=\(grace), countdown=\(countdown)"
+                )
+            }
         }
     }
 }

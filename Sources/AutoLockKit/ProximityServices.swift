@@ -5,6 +5,13 @@ import AutoLockCore
 public protocol ScreenLocking {
     @discardableResult func lock() -> Bool
     func isScreenLocked() -> Bool
+    func screenLockState() -> ScreenLockState
+}
+
+public extension ScreenLocking {
+    func screenLockState() -> ScreenLockState {
+        isScreenLocked() ? .locked : .unlocked
+    }
 }
 
 /// 디스플레이 깨우기. 실제 구현은 executable의 DisplayWaker 어댑터.
@@ -30,6 +37,7 @@ public protocol UnlockTriggering {
 public protocol ProximityScanning: AnyObject {
     var devices: [UUID: DiscoveredDevice] { get }
     var gracePeriodProvider: @MainActor () -> Int { get set }
+    var countdownPeriodProvider: @MainActor () -> Int { get set }
     func startScanning()
     func stopScanning()
 }

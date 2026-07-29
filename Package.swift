@@ -12,7 +12,8 @@ let package = Package(
         // AppKit, or system calls — so it can be unit tested without a host app.
         .target(
             name: "AutoLockCore",
-            path: "Sources/AutoLockCore"
+            path: "Sources/AutoLockCore",
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         // Wiring layer: BLE scanning, settings, and the proximity controller.
         // May use AppKit/CoreBluetooth/Combine/SwiftUI, but takes all system

@@ -85,5 +85,24 @@ final class PermissionObserver: ObservableObject {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        AppLog.record(
+            .lifecycle,
+            code: "application_launched",
+            outcome: .success,
+            message: "AutoLock 애플리케이션 실행 완료",
+            metadata: [
+                "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+                "build": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+            ]
+        )
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        AppLog.record(
+            .lifecycle,
+            code: "application_terminating",
+            outcome: .observed,
+            message: "AutoLock 애플리케이션 종료"
+        )
     }
 }

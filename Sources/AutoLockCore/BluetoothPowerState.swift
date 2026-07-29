@@ -45,4 +45,15 @@ public enum BluetoothPowerState: Equatable, Sendable {
         case .unknown, .resetting, .poweredOn: return false
         }
     }
+
+    public var logDescription: String {
+        switch self {
+        case .unknown: return "unknown"
+        case .resetting: return "resetting"
+        case .unsupported: return "unsupported"
+        case .unauthorized: return "unauthorized"
+        case .poweredOff: return "powered_off"
+        case .poweredOn: return "powered_on"
+        }
+    }
 }

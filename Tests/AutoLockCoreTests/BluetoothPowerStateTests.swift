@@ -40,4 +40,18 @@ import Testing
         #expect(!BluetoothPowerState.resetting.needsUserAction)
         #expect(!BluetoothPowerState.poweredOn.needsUserAction)
     }
+
+    @Test func stableLogDescriptionsCoverEveryAdapterState() {
+        let expected: [(BluetoothPowerState, String)] = [
+            (.unknown, "unknown"),
+            (.resetting, "resetting"),
+            (.unsupported, "unsupported"),
+            (.unauthorized, "unauthorized"),
+            (.poweredOff, "powered_off"),
+            (.poweredOn, "powered_on")
+        ]
+        for (state, description) in expected {
+            #expect(state.logDescription == description)
+        }
+    }
 }

@@ -38,6 +38,7 @@ struct MenuView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
             heroCard
+            diagnosticsCard
             devicesCard
             optionsCard
             helpCard
@@ -48,6 +49,23 @@ struct MenuView: View {
         .padding(14)
         .frame(width: 360)
         .background(Palette.bg)
+        .onAppear {
+            AppLog.record(
+                .ui,
+                code: "main_menu_opened",
+                outcome: .observed,
+                message: "메인 상태 화면 열림"
+            )
+            controller.evaluate()
+        }
+        .onDisappear {
+            AppLog.record(
+                .ui,
+                code: "main_menu_closed",
+                outcome: .observed,
+                message: "메인 상태 화면 닫힘"
+            )
+        }
         .onReceive(permissionTimer) { _ in
             let ax = UnlockTrigger.hasAccessibility()
             if ax != hasAccessibility { hasAccessibility = ax }
@@ -143,6 +161,156 @@ struct MenuView: View {
             }
         }
     }
+
+    // MARK: Operational diagnostics
+
+    private var diagnosticsCard: some View {
+        Surface {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Caption(text: "동작 진단")
+                    Spacer()
+                    Button("진단 DB") {
+                        let database = AppLog.logDatabaseURL
+                        if FileManager.default.fileExists(atPath: database.path) {
+                            NSWorkspace.shared.activateFileViewerSelecting([database])
+                        } else {
+                            NSWorkspace.shared.open(database.deletingLastPathComponent())
+                        }
+                    }
+                    .buttonStyle(GhostButtonStyle())
+                    .help(AppLog.logDatabaseURL.path)
+                }
+
+                HStack(spacing: 8) {
+                    diagnosticBadge(
+                        icon: settings.trackedDevices.isEmpty ? "link.badge.plus" : "link",
+                        label: settings.trackedDevices.isEmpty ? "미연동" : "연동됨",
+                        color: settings.trackedDevices.isEmpty ? Palette.amber : Palette.lime
+                    )
+                    diagnosticBadge(
+                        icon: screenStateIcon,
+                        label: screenStateLabel,
+                        color: screenStateColor
+                    )
+                    diagnosticBadge(
+                        icon: settings.enabled ? "wave.3.right" : "pause.fill",
+                        label: settings.enabled ? "감시 중" : "감시 꺼짐",
+                        color: settings.enabled ? Palette.lime : Palette.dim
+                    )
+                }
+
+                if let event = controller.recentEvents.first {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: eventIcon(event))
+                            .foregroundStyle(eventColor(event))
+                            .font(.system(size: 13, weight: .semibold))
+                            .frame(width: 16)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(event.message)
+                                .font(AppFont.pretendard(13, weight: .medium))
+                                .foregroundStyle(Palette.label)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("\(eventTime(event.timestamp)) · \(event.code)")
+                                .font(AppFont.pretendard(11))
+                                .foregroundStyle(Palette.dim)
+                                .lineLimit(1)
+                        }
+                        Spacer()
+                    }
+                    .padding(9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Palette.surfaceHi)
+                    )
+                } else {
+                    Text("아직 기록된 동작이 없습니다")
+                        .font(AppFont.pretendard(13))
+                        .foregroundStyle(Palette.dim)
+                }
+
+                if let failure = AppLog.persistentStoreFailure {
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(systemName: "externaldrive.badge.exclamationmark")
+                        Text("진단 DB 저장 오류: \(failure)")
+                            .lineLimit(3)
+                    }
+                    .font(AppFont.pretendard(11, weight: .medium))
+                    .foregroundStyle(Palette.crimson)
+                }
+            }
+        }
+    }
+
+    private func diagnosticBadge(icon: String, label: String, color: Color) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .semibold))
+            Text(label)
+                .font(AppFont.pretendard(11, weight: .semibold))
+        }
+        .foregroundStyle(color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(
+            Capsule().fill(color.opacity(0.11))
+        )
+    }
+
+    private var screenStateIcon: String {
+        switch controller.screenLockState {
+        case .unknown: return "questionmark.circle"
+        case .unlocked: return "lock.open.fill"
+        case .locked: return "lock.fill"
+        }
+    }
+
+    private var screenStateLabel: String {
+        switch controller.screenLockState {
+        case .unknown: return "화면 확인 중"
+        case .unlocked: return "화면 열림"
+        case .locked: return "화면 잠김"
+        }
+    }
+
+    private var screenStateColor: Color {
+        switch controller.screenLockState {
+        case .unknown: return Palette.dim
+        case .unlocked: return Palette.lime
+        case .locked: return Palette.amber
+        }
+    }
+
+    private func eventIcon(_ event: DiagnosticEvent) -> String {
+        switch event.outcome {
+        case .failure: return "exclamationmark.triangle.fill"
+        case .success: return "checkmark.circle.fill"
+        case .pending: return "clock.fill"
+        case .skipped: return "forward.fill"
+        case .observed: return "info.circle.fill"
+        }
+    }
+
+    private func eventColor(_ event: DiagnosticEvent) -> Color {
+        switch event.level {
+        case .error: return Palette.crimson
+        case .warning: return Palette.amber
+        case .info:
+            return event.outcome == .success ? Palette.lime : Palette.muted
+        }
+    }
+
+    private func eventTime(_ date: Date) -> String {
+        Self.eventTimeFormatter.string(from: date)
+    }
+
+    private static let eventTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ko_KR")
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 
     // MARK: Devices
 
@@ -260,14 +428,34 @@ struct MenuView: View {
                     valueText: "−\(settings.thresholdMagnitude) dBm",
                     binding: Binding(
                         get: { Double(settings.thresholdMagnitude) },
-                        set: { settings.thresholdMagnitude = Int(($0 / 10).rounded()) * 10 }
+                        set: { settings.thresholdMagnitude = Int(($0 / 5).rounded()) * 5 }
                     ),
                     range: 40...100,
-                    step: 10,
+                    step: 5,
                     accent: Palette.lime
                 )
-                // 신호 끊김 허용은 15초 고정(LockTuning.fixedGracePeriodSeconds)이라
-                // 더 이상 조정 슬라이더를 노출하지 않는다.
+                ParameterDial(
+                    label: "무신호 허용 시간",
+                    valueText: "\(settings.gracePeriodSeconds)초",
+                    binding: Binding(
+                        get: { Double(settings.gracePeriodSeconds) },
+                        set: { settings.gracePeriodSeconds = Int($0.rounded()) }
+                    ),
+                    range: Double(LockSettingBounds.gracePeriodRange.lowerBound)...Double(LockSettingBounds.gracePeriodRange.upperBound),
+                    step: Double(LockSettingBounds.gracePeriodStep),
+                    accent: Palette.amber
+                )
+                ParameterDial(
+                    label: "카운트다운 시간",
+                    valueText: "\(settings.countdownSeconds)초",
+                    binding: Binding(
+                        get: { Double(settings.countdownSeconds) },
+                        set: { settings.countdownSeconds = Int($0.rounded()) }
+                    ),
+                    range: Double(LockSettingBounds.countdownRange.lowerBound)...Double(LockSettingBounds.countdownRange.upperBound),
+                    step: Double(LockSettingBounds.countdownStep),
+                    accent: Palette.crimson
+                )
             }
         }
     }
@@ -396,7 +584,7 @@ struct MenuView: View {
     private var footer: some View {
         HStack(spacing: 8) {
             Button {
-                _ = ScreenLocker.lock()
+                controller.lockNow()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "lock.fill")
@@ -608,6 +796,8 @@ struct MenuView: View {
             return "\(reasonText(reason)) — \(secondsLeft)초 후 잠금"
         case .instantLock(let reason):
             return "즉시 잠금: \(reasonText(reason))"
+        case .lockRequested(let reason):
+            return "잠금 요청 확인 중: \(reasonText(reason))"
         case .locked(let reason):
             return "잠금: \(reasonText(reason))"
         case .lockFailed(let reason):
@@ -621,6 +811,7 @@ struct MenuView: View {
         case .signalWeak: return "신호 약함"
         case .signalCrashed: return "신호 급락"
         case .deviceUnseen: return "디바이스 미감지"
+        case .userRequested: return "사용자 요청"
         }
     }
 }

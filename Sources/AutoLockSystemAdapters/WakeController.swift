@@ -21,7 +21,14 @@ public enum DisplayWaker {
             &assertionID
         )
         if rc != kIOReturnSuccess {
-            AppLog.wake.error("IOPMAssertionDeclareUserActivity failed rc=\(rc, privacy: .public)")
+            AppLog.record(
+                .wake,
+                level: .error,
+                code: "display_wake_system_call_failed",
+                outcome: .failure,
+                message: "macOS 사용자 활동 선언에 실패해 화면을 깨우지 못함",
+                metadata: ["return_code": String(rc)]
+            )
             return false
         }
         return true

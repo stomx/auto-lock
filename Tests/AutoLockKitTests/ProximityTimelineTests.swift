@@ -22,18 +22,18 @@ import AutoLockCore
     private let t0 = Date(timeIntervalSinceReferenceDate: 3_000_000)
     private let deviceID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
 
-    /// grace는 더 이상 사용자 조정 항목이 아니라 15초 고정. 타임라인 테스트도
-    /// 이 고정값으로 동작/검증한다.
-    private let grace = LockTuning.fixedGracePeriodSeconds
+    private let defaultGrace = LockSettingBounds.defaultGracePeriodSeconds
+    private let defaultCountdown = LockSettingBounds.defaultCountdownSeconds
 
     /// 격리된 UserDefaults suite로 Settings를 만든다.
-    private func makeSettings(magnitude: Int) -> Settings {
+    private func makeSettings(magnitude: Int, grace: Int, countdown: Int) -> Settings {
         let suite = "timeline-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         let s = Settings(defaults: defaults)
         s.enabled = true
         s.thresholdMagnitude = magnitude     // threshold = -magnitude
-        // grace는 Settings.gracePeriodSeconds가 항상 15초 고정으로 반환.
+        s.gracePeriodSeconds = grace
+        s.countdownSeconds = countdown
         // wake/unlock 경로가 near 상태에서 끼어들지 않도록 비활성화 — 이 Suite는
         // 잠금 루프만 본다. (화면은 항상 unlocked로 두므로 lock()은 1회만 먹힌다.)
         s.wakeOnProximity = false
@@ -68,13 +68,17 @@ import AutoLockCore
     ///  5. 관측치 기록
     private func replay(
         magnitude: Int,
+        grace: Int? = nil,
+        countdown: Int? = nil,
         through lastTick: Int,
         locker: SpyScreenLocker = SpyScreenLocker(),
         overlay: SpyOverlay? = nil,
         scenario: Scenario
     ) -> [Frame] {
         let overlay = overlay ?? SpyOverlay()
-        let settings = makeSettings(magnitude: magnitude)
+        let grace = grace ?? defaultGrace
+        let countdown = countdown ?? defaultCountdown
+        let settings = makeSettings(magnitude: magnitude, grace: grace, countdown: countdown)
         let scanner = FakeScanner()
         let c = ProximityController(
             scanner: scanner,
@@ -85,7 +89,10 @@ import AutoLockCore
             unlocker: SpyUnlocker()
         )
 
-        let pruneAfter = LockTuning.pruneAfterSeconds(gracePeriodSeconds: grace)
+        let pruneAfter = LockTuning.pruneAfterSeconds(
+            gracePeriodSeconds: grace,
+            countdownSeconds: countdown
+        )
 
         // 시나리오가 광고를 멈춰도 직전 lastSeen/rssi를 이어가야 하므로 누적 보관.
         var frozenLastSeenTick: Int? = nil
@@ -138,26 +145,25 @@ import AutoLockCore
 
     // MARK: - 1. 광고 중단 → 카운트다운 → 잠금 (닫힌 루프 핵심)
     //
-    // grace=15, threshold -70. tick0~5 강신호 광고 → near. tick6부터 광고
-    // 중단(lastSeen=5 동결). age가 grace(15)를 넘는 tick21부터 카운트다운,
-    // age가 absence(30)를 넘는 tick36에서 즉시잠금이 발화한다.
+    // 기본 grace=10, countdown=5, threshold -70. tick0~5 강신호 광고 →
+    // near. tick6부터 광고 중단(lastSeen=5 동결). age=10인 tick15부터
+    // 카운트다운, age=15인 tick20에서 잠금이 발화한다.
     //
-    // 핵심 불변식: 잠금이 발화한 틱(t=36, age=31)에서 age(31) ≤ prune(32)이라
+    // 핵심 불변식: 잠금이 발화한 틱(t=20, age=15)에서 age(15) ≤ prune(17)이라
     // 디바이스가 아직 맵에 살아있다 — 프루너가 잠금보다 늦게 evict한다.
     @Test func awayByStaleThenLocks() {
-        // grace=15 → absence=30, prune=32. lastSeen=5.
-        let frames = replay(magnitude: 70, through: 40) { tick in
+        let frames = replay(magnitude: 70, through: 24) { tick in
             tick <= 5 ? (rssi: -50, lastSeenTick: tick) : nil
         }
 
         // 초반엔 near.
         #expect(frames[0].state == .near)
         #expect(frames[5].state == .near)
-        #expect(frames.prefix(21).allSatisfy { $0.lockCount == 0 })
+        #expect(frames.prefix(20).allSatisfy { $0.lockCount == 0 })
 
-        // age > grace(15) 진입 구간(lastSeen=5 → tick21에서 age16)부터 카운트다운.
-        #expect(isCountdown(frames[21].status))
-        #expect(frames[21].state == .borderline)
+        // lastSeen=5 → tick15(age10)부터 5초 카운트다운.
+        #expect(isCountdown(frames[15].status))
+        #expect(frames[15].state == .borderline)
 
         // 결국 잠금이 발화한다.
         let lockTick = frames.first { $0.lockCount == 1 }?.tick
@@ -169,19 +175,17 @@ import AutoLockCore
         #expect(lockFrame.devicePresent == true)
         #expect(lockFrame.state == .away)
 
-        // 실측 경계: age>absence(30) 첫 틱 = t36(age31). prune(32)은 t38부터라 아직 존재.
-        #expect(lockFrame.tick == 36)
+        #expect(lockFrame.tick == 20)
     }
 
     // MARK: - 2. 이탈 중 복귀 → 잠금 안 됨
     //
-    // grace=15. tick0~5 near. tick6~23 광고 중단(카운트다운 진입까지 감).
-    // tick24부터 강신호 광고 재개 → awaySince 리셋 → near 회복, 잠금 0.
-    // (lastSeen=5, age>absence(30)은 t36부터라 복귀 t24가 더 빠르다 → 잠금 0 유지.)
+    // 기본 10+5초. tick0~5 near, tick6~18 광고 중단, tick19부터 강신호
+    // 광고 재개 → 카운트다운 종료 직전 near 회복, 잠금 0.
     @Test func returnsToNearBeforeLock() {
-        let frames = replay(magnitude: 70, through: 30) { tick in
+        let frames = replay(magnitude: 70, through: 25) { tick in
             if tick <= 5 { return (rssi: -50, lastSeenTick: tick) }
-            if tick <= 23 { return nil }            // 광고 중단
+            if tick <= 18 { return nil }            // 광고 중단
             return (rssi: -50, lastSeenTick: tick)  // 복귀
         }
 
@@ -189,7 +193,7 @@ import AutoLockCore
         #expect(frames.contains { isCountdown($0.status) })
 
         // 복귀 후 near 회복.
-        #expect(frames[24].state == .near)
+        #expect(frames[19].state == .near)
         #expect(frames.last!.state == .near)
 
         // 전체 시퀀스에서 단 한 번도 잠기지 않는다.
@@ -198,10 +202,10 @@ import AutoLockCore
 
     // MARK: - 3. 신호 약화형 → 급락 즉시잠금
     //
-    // grace=15, threshold -70(defAway -80). 디바이스는 계속 광고(lastSeen 매
+    // threshold -70(defAway -80). 디바이스는 계속 광고(lastSeen 매
     // 틱 갱신)하지만 rssi가 -50에서 매 틱 -3씩 약해진다.
     // near(-50~-68) → 약신호 카운트다운(-71~-77) → -80 도달 시 즉시잠금(crashed).
-    // lastSeen이 항상 fresh라 grace와 무관하게 rssi 분기로 잠긴다(t10, rssi -80).
+    // lastSeen이 항상 fresh라 무신호 설정과 무관하게 잠긴다(t10, rssi -80).
     @Test func weakeningSignalCrashesToLock() {
         let frames = replay(magnitude: 70, through: 15) { tick in
             (rssi: -50 - 3 * Double(tick), lastSeenTick: tick)
@@ -227,28 +231,36 @@ import AutoLockCore
 
     // MARK: - 4. 카운트다운 오버레이 표시 타이밍
     //
-    // 시나리오1과 동일 입력이되 overlay.show 타이밍에 집중. 카운트다운 deadline
-    // 5초 이내(overlayWindowSeconds) 구간에서만 show가 불리고 그 전에는 hide.
-    // grace=15: awaySince=t21 → deadline=t36. remaining<=5 인 t31~t35에서 show.
-    @Test func staleCountdownShowsOverlayInFinalWindow() {
+    // 시나리오1과 동일 입력. 10초 무신호 허용 동안은 숨기고, 설정된 5초
+    // 카운트다운 전체(t15~t19)를 표시한다.
+    @Test func staleCountdownShowsOverlayForConfiguredDuration() {
         let overlay = SpyOverlay()
-        // through:36 — t36 instant-lock 직후까지만 본다. 그 이후엔 디바이스가
-        // pruned되며 deviceUnseen 카운트다운이 새로 시작해 오버레이를 다시 열어
-        // lastDeadline을 덮으므로(이 테스트의 관심사 아님) 잠금 시점에서 끊는다.
-        let frames = replay(magnitude: 70, through: 36, overlay: overlay) { tick in
+        let frames = replay(magnitude: 70, through: 20, overlay: overlay) { tick in
             tick <= 5 ? (rssi: -50, lastSeenTick: tick) : nil
         }
 
-        // final window 진입 전(카운트다운 시작 t21 ~ t30)에는 show가 한 번도 안 불린다.
-        #expect(frames.first { $0.showCount > 0 }!.tick == 31)
-        #expect(frames.prefix(31).allSatisfy { $0.showCount == 0 })
+        #expect(frames.first { $0.showCount > 0 }!.tick == 15)
+        #expect(frames.prefix(15).allSatisfy { $0.showCount == 0 })
 
-        // final window(t31~t35)에서 show가 실제로 호출되고 deadline이 잡힌다.
         #expect(overlay.showCount >= 1)
         #expect(overlay.lastDeadline != nil)
 
-        // deadline은 awaySince(t21) + grace(15) = t0 + 36초.
-        let expectedDeadline = t0.addingTimeInterval(36)
+        let expectedDeadline = t0.addingTimeInterval(20)
         #expect(abs(overlay.lastDeadline!.timeIntervalSince(expectedDeadline)) < 0.001)
+    }
+
+    @Test func customTimingControlsEndToEndLockDeadline() {
+        // lastSeen=t2, grace=20, countdown=3 → t22부터 표시, t25 잠금.
+        let frames = replay(
+            magnitude: 70,
+            grace: 20,
+            countdown: 3,
+            through: 27
+        ) { tick in
+            tick <= 2 ? (rssi: -50, lastSeenTick: tick) : nil
+        }
+
+        #expect(isCountdown(frames[22].status))
+        #expect(frames.first { $0.lockCount == 1 }?.tick == 25)
     }
 }
